@@ -1,0 +1,40 @@
+version: '3.9'
+
+services:
+  mongodb:
+    image: mongo:5.0
+    container_name: emergency-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    container_name: emergency-backend
+    restart: always
+    ports:
+      - "4000:4000"
+    env_file:
+      - backend/.env.example
+    depends_on:
+      - mongodb
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emergency-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    env_file:
+      - .env.example
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:

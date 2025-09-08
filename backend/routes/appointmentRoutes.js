@@ -1,55 +1,24 @@
-// backend/routes/appointmentRoutes.js
 const express = require('express');
 const router = express.Router();
 const appointmentController = require('../controllers/appointmentController');
-const { authenticateToken } = require('../middleware/auth');
-const { appointmentValidationRules, validate } = require('../middleware/validation');
+const { authenticate, authorize } = require('../middleware/auth');
+const { validateAppointment, handleValidation } = require('../middleware/validation');
 
-// All routes require authentication
-router.use(authenticateToken);
+router.use(authenticate);
 
-// Get appointments
-router.get('/',
-  appointmentController.getAppointments
-);
+// GET /api/appointments - list appointments relevant to user
+router.get('/', appointmentController.getAllAppointments);
 
-// Get appointment by ID
-router.get('/:id',
-  appointmentController.getAppointmentById
-);
+// POST /api/appointments - create new appointment
+router.post('/', validateAppointment(), handleValidation, appointmentController.createAppointment);
 
-// Create new appointment
-router.post('/',
-  appointmentValidationRules.create,
-  validate,
-  appointmentController.createAppointment
-);
+// GET /api/appointments/:id - get appointment
+router.get('/:id', appointmentController.getAppointmentById);
 
-// Update appointment
-router.put('/:id',
-  appointmentValidationRules.update,
-  validate,
-  appointmentController.updateAppointment
-);
+// PUT /api/appointments/:id - update appointment
+router.put('/:id', validateAppointment(), handleValidation, appointmentController.updateAppointment);
 
-// Cancel appointment
-router.delete('/:id',
-  appointmentController.cancelAppointment
-);
-
-// Reschedule appointment
-router.post('/:id/reschedule',
-  appointmentController.rescheduleAppointment
-);
-
-// Get available slots
-router.get('/slots/available',
-  appointmentController.getAvailableSlots
-);
-
-// Send appointment reminder
-router.post('/:id/reminder',
-  appointmentController.sendReminder
-);
+// DELETE /api/appointments/:id - delete appointment
+router.delete('/:id', appointmentController.deleteAppointment);
 
 module.exports = router;

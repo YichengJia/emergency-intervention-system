@@ -1,73 +1,25 @@
-// backend/routes/patientRoutes.js
 const express = require('express');
 const router = express.Router();
 const patientController = require('../controllers/patientController');
-const { authenticateToken, canAccessPatientData } = require('../middleware/auth');
-const { patientValidationRules, validate } = require('../middleware/validation');
+const { authenticate, authorize } = require('../middleware/auth');
+const { validatePatient, handleValidation } = require('../middleware/validation');
 
-// All routes require authentication
-router.use(authenticateToken);
+// All endpoints require authentication
+router.use(authenticate);
 
-// Get patient profile
-router.get('/:patientId',
-  canAccessPatientData,
-  patientController.getPatientProfile
-);
+// GET /api/patients - doctors and admins can view all patients
+router.get('/', authorize('doctor', 'admin'), patientController.getAllPatients);
 
-// Update patient profile
-router.put('/:patientId',
-  canAccessPatientData,
-  patientController.updatePatientProfile
-);
+// POST /api/patients - create a new patient record
+router.post('/', validatePatient(), handleValidation, patientController.createPatient);
 
-// Get patient medications
-router.get('/:patientId/medications',
-  canAccessPatientData,
-  patientController.getMedications
-);
+// GET /api/patients/:id - view a specific patient
+router.get('/:id', patientController.getPatientById);
 
-// Update medication adherence
-router.post('/:patientId/medications/:medicationId/adherence',
-  canAccessPatientData,
-  patientController.updateMedicationAdherence
-);
+// PUT /api/patients/:id - update a patient record
+router.put('/:id', validatePatient(), handleValidation, patientController.updatePatient);
 
-// Get patient vitals
-router.get('/:patientId/vitals',
-  canAccessPatientData,
-  patientController.getVitals
-);
-
-// Add new vitals
-router.post('/:patientId/vitals',
-  canAccessPatientData,
-  patientValidationRules.updateVitals,
-  validate,
-  patientController.addVitals
-);
-
-// Get patient appointments
-router.get('/:patientId/appointments',
-  canAccessPatientData,
-  patientController.getAppointments
-);
-
-// Get medical history
-router.get('/:patientId/medical-history',
-  canAccessPatientData,
-  patientController.getMedicalHistory
-);
-
-// Get risk assessment
-router.get('/:patientId/risk-assessment',
-  canAccessPatientData,
-  patientController.getRiskAssessment
-);
-
-// Emergency protocols
-router.get('/:patientId/emergency-protocols',
-  canAccessPatientData,
-  patientController.getEmergencyProtocols
-);
+// DELETE /api/patients/:id - delete a patient
+router.delete('/:id', patientController.deletePatient);
 
 module.exports = router;

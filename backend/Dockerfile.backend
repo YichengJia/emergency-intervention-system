@@ -1,4 +1,17 @@
-FROM ubuntu:latest
-LABEL authors="Ziye Zhang"
+FROM node:18-alpine
 
-ENTRYPOINT ["top", "-b"]
+# Create app directory
+WORKDIR /usr/src/app
+
+# Install app dependencies
+COPY package.json package-lock.json ./
+RUN npm install --production
+
+# Bundle app source
+COPY . .
+
+# Expose port
+EXPOSE 4000
+
+# Start the server
+CMD ["node", "server.js"]

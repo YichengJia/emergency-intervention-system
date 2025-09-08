@@ -1,39 +1,25 @@
-// backend/config/database.js
 const mongoose = require('mongoose');
 
-const connectDatabase = async () => {
-  try {
-    const options = {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-    };
-
-    await mongoose.connect(process.env.MONGODB_URI, options);
-
-    console.log('MongoDB connected successfully');
-
-    // Handle connection events
-    mongoose.connection.on('error', (err) => {
-      console.error('MongoDB connection error:', err);
-    });
-
-    mongoose.connection.on('disconnected', () => {
-      console.log('MongoDB disconnected');
-    });
-
-    // Graceful shutdown
-    process.on('SIGINT', async () => {
-      await mongoose.connection.close();
-      console.log('MongoDB connection closed through app termination');
-      process.exit(0);
-    });
-
-  } catch (error) {
-    console.error('Database connection failed:', error);
-    process.exit(1);
+/**
+ * Connect to the MongoDB instance using Mongoose.
+ * The connection string is read from the MONGODB_URI environment variable.
+ */
+async function connectDatabase() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error('MONGODB_URI is not defined in environment variables');
   }
-};
 
-module.exports = connectDatabase;
+  try {
+    await mongoose.connect(uri, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true
+    });
+    console.log('✅ MongoDB connected');
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    throw err;
+  }
+}
+
+module.exports = { connectDatabase };

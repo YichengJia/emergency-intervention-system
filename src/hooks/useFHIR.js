@@ -1,48 +1,36 @@
-// src/hooks/useFHIR.js
-import { useState, useEffect } from 'react';
-import { fhirService } from '../services/api';
+import { useState, useEffect, useCallback } from 'react';
+import { FHIR_BASE_URL } from '../utils/constants';
 
-export const useFHIR = () => {
-  const [isConnected, setIsConnected] = useState(false);
+/**
+ * Custom hook to fetch resources from a FHIR server.
+ * Accepts the resource type (e.g. 'Patient', 'Observation') and optional query params.
+ */
+export function useFHIR(resourceType, query = '') {
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const authorize = async () => {
+  const fetchResource = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await fhirService.authorize();
-      setIsConnected(result.authorized);
-      return result;
+      const url = `${FHIR_BASE_URL}/${resourceType}${query ? '?' + query : ''}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${resourceType}`);
+      }
+      const json = await response.json();
+      setData(json);
     } catch (err) {
       setError(err.message);
-      setIsConnected(false);
-      throw err;
     } finally {
       setLoading(false);
     }
-  };
+  }, [resourceType, query]);
 
-  const getPatient = async (patientId) => {
-    if (!isConnected) {
-      throw new Error('FHIR client not connected');
-    }
-    return fhirService.getPatient(patientId);
-  };
+  useEffect(() => {
+    fetchResource();
+  }, [fetchResource]);
 
-  const getObservations = async (patientId, code) => {
-    if (!isConnected) {
-      throw new Error('FHIR client not connected');
-    }
-    return fhirService.getObservations(patientId, code);
-  };
-
-  return {
-    isConnected,
-    loading,
-    error,
-    authorize,
-    getPatient,
-    getObservations
-  };
-};
+  return { data, loading, error, refetch: fetchResource };
+}

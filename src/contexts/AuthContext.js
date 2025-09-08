@@ -1,72 +1,58 @@
-// src/contexts/AuthContext.js
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import apiService from '../services/api';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import api from '../services/api';
 
-const AuthContext = createContext(null);
+// Create context
+const AuthContext = createContext();
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
-};
-
+/**
+ * AuthProvider wraps children and provides authentication context including
+ * the logged in user and functions for logging in, registering and logging out.
+ */
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
+  // Load user from local storage on initial load
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
     const storedUser = localStorage.getItem('user');
-
-    if (token && storedUser) {
+    const token = localStorage.getItem('token');
+    if (storedUser && token) {
+      api.setToken(token);
       setUser(JSON.parse(storedUser));
-      setIsAuthenticated(true);
     }
-
     setLoading(false);
   }, []);
 
-  const login = async (email, password) => {
-    try {
-      const response = await apiService.login(email, password);
-      setUser(response.user);
-      setIsAuthenticated(true);
-      return response;
-    } catch (error) {
-      throw error;
-    }
+  const login = async (credentials) => {
+    const res = await api.post('/auth/login', credentials);
+    const { user: u, token } = res.data;
+    localStorage.setItem('user', JSON.stringify(u));
+    localStorage.setItem('token', token);
+    api.setToken(token);
+    setUser(u);
   };
 
-  const register = async (userData) => {
-    try {
-      const response = await apiService.register(userData);
-      setUser(response.user);
-      setIsAuthenticated(true);
-      return response;
-    } catch (error) {
-      throw error;
-    }
+  const register = async (data) => {
+    const res = await api.post('/auth/register', data);
+    const { user: u, token } = res.data;
+    localStorage.setItem('user', JSON.stringify(u));
+    localStorage.setItem('token', token);
+    api.setToken(token);
+    setUser(u);
   };
 
   const logout = () => {
-    apiService.logout();
-    setUser(null);
-    setIsAuthenticated(false);
-    localStorage.removeItem('authToken');
     localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    api.setToken(null);
+    setUser(null);
   };
 
-  const value = {
-    user,
-    loading,
-    isAuthenticated,
-    login,
-    register,
-    logout
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
+
+export const useAuthContext = () => useContext(AuthContext);

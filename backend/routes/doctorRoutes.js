@@ -1,61 +1,24 @@
-// backend/routes/doctorRoutes.js
 const express = require('express');
 const router = express.Router();
 const doctorController = require('../controllers/doctorController');
-const { authenticateToken, requireRole } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
+const { handleValidation } = require('../middleware/validation');
 
-// All routes require authentication and doctor role
-router.use(authenticateToken);
-router.use(requireRole('doctor'));
+router.use(authenticate);
 
-// Get all assigned patients
-router.get('/patients',
-  doctorController.getAssignedPatients
-);
+// GET /api/doctors - list doctors (admin and doctors themselves)
+router.get('/', authorize('admin', 'doctor'), doctorController.getAllDoctors);
 
-// Get patient details
-router.get('/patients/:patientId',
-  doctorController.getPatientDetails
-);
+// POST /api/doctors - create a doctor (admin only)
+router.post('/', authorize('admin'), doctorController.createDoctor);
 
-// Add patient notes
-router.post('/patients/:patientId/notes',
-  doctorController.addPatientNotes
-);
+// GET /api/doctors/:id - get doctor
+router.get('/:id', doctorController.getDoctorById);
 
-// Update patient risk level
-router.put('/patients/:patientId/risk-level',
-  doctorController.updateRiskLevel
-);
+// PUT /api/doctors/:id - update doctor
+router.put('/:id', doctorController.updateDoctor);
 
-// Prescribe medication
-router.post('/patients/:patientId/prescriptions',
-  doctorController.prescribeMedication
-);
-
-// Get doctor's schedule
-router.get('/schedule',
-  doctorController.getSchedule
-);
-
-// Get doctor's appointments
-router.get('/appointments',
-  doctorController.getAppointments
-);
-
-// Update appointment notes
-router.put('/appointments/:appointmentId/notes',
-  doctorController.updateAppointmentNotes
-);
-
-// Get analytics dashboard
-router.get('/analytics',
-  doctorController.getAnalytics
-);
-
-// Get notifications
-router.get('/notifications',
-  doctorController.getNotifications
-);
+// DELETE /api/doctors/:id - delete doctor
+router.delete('/:id', authorize('admin'), doctorController.deleteDoctor);
 
 module.exports = router;

@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.js"></script>
+    <script>
+        FHIR.oauth2.authorize({
+            client_id: "your-app-client-id",
+            scope: "patient/Patient.read patient/MedicationRequest.read patient/Appointment.read launch"
+        });
+    </script>
+</head>
+<body>
+    Launching...
+</body>
+</html>
+*/

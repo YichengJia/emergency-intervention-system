@@ -1,3 +1,4 @@
+# .github/workflows/ci.yml
 name: CI
 
 on:
@@ -11,20 +12,27 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [16.x]
+        node-version: [16.x, 18.x]
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
-      - name: Install dependencies
+
+      - name: Install frontend dependencies
+        run: npm install
+      
+      - name: Install backend dependencies
         run: |
-          cd emergency-intervention-system
-          npm install
           cd backend
           npm install
-      - name: Run tests
-        run: |
-          cd emergency-intervention-system
-          npm test -- --watchAll=false
+          cd ..
+      
+      - name: Run frontend tests
+        run: npm test -- --watchAll=false
+      
+      - name: Build frontend
+        run: npm run build

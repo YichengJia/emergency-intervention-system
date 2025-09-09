@@ -1,0 +1,10 @@
+{
+  "client_name": "Emergency Intervention System (Prototype)",
+  "redirect_uris": ["http://localhost:5173/"],
+  "grant_types": ["authorization_code"],
+  "token_endpoint_auth_method": "none",
+  "scope": "launch/patient patient/*.read patient/*.write openid fhirUser offline_access",
+  "initiate_login_uri": "http://localhost:5173/launch",
+  "jwks_uri": "http://localhost:5173/jwks",
+  "aud": "https://launch.smarthealthit.org/v/r4/sim/eyJrIjoiMSIsImoiOiIxIn0/fhir"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Emergency Intervention System",
+  "short_name": "EIS",
+  "start_url": "/",
+  "display": "standalone"
+}

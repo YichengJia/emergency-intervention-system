@@ -27,6 +27,26 @@ connectDatabase().catch((err) => {
   process.exit(1);
 });
 
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow Docker request and local development
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://frontend:80',
+      'http://localhost:80'
+    ];
+
+    // Non-original request(such as postman)
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -49,5 +69,5 @@ app.use(errorHandler);
 // Start server
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
+  console.log(` Server listening on port ${PORT}`);
 });

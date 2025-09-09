@@ -2,9 +2,11 @@
 FROM node:18-alpine AS build
 WORKDIR /usr/src/app
 
-# Copy only package metadata and install dependencies
-COPY package.json package-lock.json ./
-RUN npm install --production && npm cache clean --force
+# Copy package.json (package-lock.json is optional)
+COPY package*.json ./
+
+# Install ALL dependencies (not just production)
+RUN npm install
 
 # Copy the rest of the application source
 COPY . .

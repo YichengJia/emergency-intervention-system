@@ -1,11 +1,16 @@
 FROM node:18-alpine
 
+# Install wget for healthcheck
+RUN apk add --no-cache wget
+
 # Create app directory
 WORKDIR /usr/src/app
 
-# Install app dependencies
-COPY package.json package-lock.json ./
-RUN npm install --production
+# Copy package.json (package-lock.json is optional)
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
 
 # Bundle app source
 COPY . .

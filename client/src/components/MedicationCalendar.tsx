@@ -25,7 +25,6 @@ function labelFor(m: any) {
 function buildTodaySchedule(meds: any[]) {
   // For MVP we generate 3 times; in production parse dosageInstruction.timing.
   const times = ["08:00", "12:00", "20:00"];
-  // If multiple meds exist, you could flatten times x meds
   const medText = meds.length > 0 ? labelFor(meds[0]) : "Medication";
   return times.map((t) => ({ time: t, medText }));
 }
@@ -41,7 +40,8 @@ const MedicationCalendar: React.FC<MedicationCalendarProps> = ({
   const today = useMemo(() => buildTodaySchedule(meds), [meds]);
 
   const submitIntake = async (taken: boolean, slot: { time: string; medText: string }) => {
-    setBusy(true); setMsg("");
+    setBusy(true);
+    setMsg("");
     try {
       const ts = new Date().toISOString();
       await createMedicationStatement(patient, slot.medText, taken, ts);

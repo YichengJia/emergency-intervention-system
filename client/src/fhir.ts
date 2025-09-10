@@ -1,39 +1,95 @@
 // client/src/fhir.ts
-
 import FHIR from "fhirclient";
 
-/** Env */
 const CLIENT_ID = import.meta.env.VITE_SMART_CLIENT_ID as string;
 const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI as string;
 const FHIR_ISS = import.meta.env.VITE_FHIR_ISS as string | undefined;
 
-/**
- * If we are not coming from the SMART launcher (no ?iss & ?launch),
- * this will initiate a SMART EHR launch-like authorization using env ISS.
- */
 export async function smartAuthorize() {
-  if (!CLIENT_ID || !REDIRECT_URI) {
-    throw new Error("Missing CLIENT_ID or REDIRECT_URI env variables.");
-  }
-  // If you don't have ISS in URL and not provided in env, you cannot proceed
+  if (!CLIENT_ID || !REDIRECT_URI) throw new Error("Missing env variables.");
   if (!FHIR_ISS) {
-    throw new Error(
-      "No server url found. Provide iss in URL via SMART Launcher or set VITE_FHIR_ISS in .env."
-    );
+    throw new Error("No server url found. Provide iss in URL or set VITE_FHIR_ISS.");
   }
   await FHIR.oauth2.authorize({
     clientId: CLIENT_ID,
-    scope:
-      "launch/patient patient/*.read patient/*.write openid fhirUser offline_access",
+    scope: "launch/patient patient/*.read patient/*.write openid fhirUser offline_access",
     redirectUri: REDIRECT_URI,
-    iss: FHIR_ISS,
-    pkce: true
-  });
+    iss: FHIR_ISS
+    // pkce: true
+  } as any);
 }
 
-/** Returns a ready SMART client or throws */
 export async function getClient() {
   return FHIR.oauth2.ready();
+}
+
+export async function searchPatientsByName(q: string) {
+  const client = await getClient();
+  const bundle = await client.request(`Patient?name=${encodeURIComponent(q)}&_summary=true&_count=20`, { flat: true });
+  return Array.isArray(bundle) ? bundle : [];
+}
+
+/** ----- Panel management using List ----- */
+function panelTitleFor(practId: string) {
+  return `EIS-Panel-${practId}`;
+}
+
+export async function upsertPanelList(practitionerId: string) {
+  const client = await getClient();
+  const title = panelTitleFor(practitionerId);
+  const existing = await client
+    .request(`List?title=${encodeURIComponent(title)}&_count=1`, { flat: true })
+    .catch(() => []);
+  if (Array.isArray(existing) && existing.length > 0) return existing[0];
+
+  const list = {
+    resourceType: "List",
+    status: "current",
+    mode: "working",
+    title,
+    subject: undefined
+  };
+  return client.create(list);
+}
+
+export async function addPatientToPanel(practitionerId: string, patientId: string) {
+  const client = await getClient();
+  const panel = await upsertPanelList(practitionerId);
+  const full = await client.read({ resourceType: "List", id: panel.id });
+  const entries = full.entry || [];
+  const exists = entries.some((e: any) => e.item?.reference === `Patient/${patientId}`);
+  if (!exists) {
+    entries.push({ item: { reference: `Patient/${patientId}` } });
+    full.entry = entries;
+    return client.update(full);
+  }
+  return full;
+}
+
+export async function listPanelPatients(practitionerId: string) {
+  const client = await getClient();
+  const panel = await upsertPanelList(practitionerId);
+  const full = await client.read({ resourceType: "List", id: panel.id });
+  const ids = (full.entry || [])
+    .map((e: any) => e.item?.reference)
+    .filter((r: string) => r?.startsWith("Patient/"))
+    .map((r: string) => r.split("/")[1]);
+  if (ids.length === 0) return [];
+  // Batch fetch patients
+  const results: any[] = [];
+  for (const id of ids) {
+    try { results.push(await client.read({ resourceType: "Patient", id })); } catch {}
+  }
+  return results;
+}
+
+export async function listPatientMedicationStatements(patientId: string) {
+  const client = await getClient();
+  const bundle = await client.request(
+    `MedicationStatement?patient=${encodeURIComponent(patientId)}&_sort=-dateAsserted&_count=50`,
+    { flat: true }
+  );
+  return Array.isArray(bundle) ? bundle : [];
 }
 
 /** Convenience helpers to read common resources */

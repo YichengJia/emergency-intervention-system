@@ -1,52 +1,33 @@
-// client/src/components/MedicationCalendar.tsx
-// Simplified daily schedule UI for medication adherence logging.
-
 import React, { useMemo, useState } from "react";
-import {
-  createMedicationStatement,
-  createCommunicationToPractitioner
-} from "../fhir";
+import { createMedicationStatement, createCommunicationToPractitioner } from "../fhir";
+import { parseTimesFromDosageText } from "../timing";
 
-interface MedicationCalendarProps {
+const MedicationCalendar: React.FC<{
   patient: any;
-  meds: any[]; // MedicationRequest[]
-  practitionerRef?: string; // "Practitioner/{id}" from fhirUser
+  meds: any[];
+  practitionerRef?: string;
   riskLevel: "LOW" | "MODERATE" | "HIGH";
-}
-
-function labelFor(m: any) {
-  return (
-    m?.medicationCodeableConcept?.text ||
-    m?.medicationCodeableConcept?.coding?.[0]?.display ||
-    "Medication"
-  );
-}
-
-function buildTodaySchedule(meds: any[]) {
-  // For MVP we generate 3 times; in production parse dosageInstruction.timing.
-  const times = ["08:00", "12:00", "20:00"];
-  const medText = meds.length > 0 ? labelFor(meds[0]) : "Medication";
-  return times.map((t) => ({ time: t, medText }));
-}
-
-const MedicationCalendar: React.FC<MedicationCalendarProps> = ({
-  patient,
-  meds,
-  practitionerRef,
-  riskLevel
-}) => {
+}> = ({ patient, meds, practitionerRef, riskLevel }) => {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  const today = useMemo(() => buildTodaySchedule(meds), [meds]);
+  const today = useMemo(() => {
+    // Build schedule per medication using timing text if available
+    const entries: { time: string; medText: string }[] = [];
+    for (const m of meds) {
+      const medText = m?.medicationCodeableConcept?.text || m?.medicationCodeableConcept?.coding?.[0]?.display || "Medication";
+      const text = m?.dosageInstruction?.[0]?.text || m?.dosageInstruction?.[0]?.timing?.code?.text || "";
+      for (const t of parseTimesFromDosageText(text)) entries.push({ time: t, medText });
+    }
+    if (entries.length === 0) return [{ time: "08:00", medText: "Medication" }, { time: "20:00", medText: "Medication" }];
+    // Sort by HH:mm
+    return entries.sort((a, b) => a.time.localeCompare(b.time));
+  }, [meds]);
 
   const submitIntake = async (taken: boolean, slot: { time: string; medText: string }) => {
-    setBusy(true);
-    setMsg("");
+    setBusy(true); setMsg("");
     try {
       const ts = new Date().toISOString();
       await createMedicationStatement(patient, slot.medText, taken, ts);
-
-      // Notify the practitioner if missed or elevated risk
       if (!taken || riskLevel !== "LOW") {
         const text = taken
           ? `Patient ${patient.id} took ${slot.medText} at ${ts}.`
@@ -55,7 +36,6 @@ const MedicationCalendar: React.FC<MedicationCalendarProps> = ({
           await createCommunicationToPractitioner(patient, text, practitionerRef);
         }
       }
-
       setMsg(taken ? "Recorded as taken." : "Recorded as missed.");
     } catch (e: any) {
       setMsg(`Error: ${e?.message || String(e)}`);
@@ -65,23 +45,21 @@ const MedicationCalendar: React.FC<MedicationCalendarProps> = ({
   };
 
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-      <h3 style={{ marginTop: 0 }}>Medication Calendar (Today)</h3>
+    <div style={{ border: "1px solid #ddd", padding: 12, borderRadius: 8, margin: "8px 0" }}>
+      <b>Medication Calendar (Today)</b>
       {today.map((s, idx) => (
-        <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <div style={{ minWidth: 80 }}>{s.time}</div>
+        <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <div style={{ width: 60 }}>{s.time}</div>
           <div style={{ flex: 1 }}>{s.medText}</div>
-          <button disabled={busy} onClick={() => submitIntake(true, s)}>Taken</button>
-          <button disabled={busy} onClick={() => submitIntake(false, s)}>Missed</button>
+          <button onClick={() => submitIntake(true, s)} disabled={busy}>Taken</button>
+          <button onClick={() => submitIntake(false, s)} disabled={busy}>Missed</button>
         </div>
       ))}
       {msg && <div style={{ marginTop: 8 }}>{msg}</div>}
-
-      <p style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-        * Simplified schedule for MVP. Parse dosageInstruction.timing in production.
-      </p>
+      <div style={{ fontSize: 12, color: "#555", marginTop: 8 }}>
+        * Schedule parsing is simplified for MVP. Parse full timing in production.
+      </div>
     </div>
   );
 };
-
 export default MedicationCalendar;

@@ -72,7 +72,7 @@ const ClinicianDashboard: React.FC<Props> = ({ practitionerRef, practitionerId }
   }, [inbox]);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 12 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "AppointmentScheduler.tsx.2fr 1fr", gap: 12 }}>
       <div>
         <h3 style={{ marginTop: 0 }}>Clinician Inbox</h3>
         {loading && <div>Loading...</div>}

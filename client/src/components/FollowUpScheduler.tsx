@@ -1,46 +1,26 @@
-// client/src/components/FollowUpScheduler.tsx
 import React, { useState } from "react";
 
-interface Props {
-  onCreate: (summary: string) => Promise<void>;
-}
-
-const FollowUpScheduler: React.FC<Props> = ({ onCreate }) => {
-  const [summary, setSummary] = useState(
-    "Education on medication adherence and diet; GP follow-up in 7 days; review in 14/30 days."
-  );
+const FollowUpScheduler: React.FC<{ onCreate: (summary: string) => Promise<void> }> = ({ onCreate }) => {
+  const [summary, setSummary] = useState("Education on medication adherence and diet; GP follow-up in 7 days; review in 14/30 days.");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
   const handleCreate = async () => {
-    setBusy(true);
-    setMsg("");
-    try {
-      await onCreate(summary);
-      setMsg("CarePlan created.");
-    } catch (e: any) {
-      setMsg(`Error: ${e?.message || e}`);
-    } finally {
-      setBusy(false);
-    }
+    setBusy(true); setMsg("");
+    try { await onCreate(summary); setMsg("CarePlan created."); }
+    catch (e: any) { setMsg(`Error: ${e?.message || e}`); }
+    finally { setBusy(false); }
   };
 
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-      <h3 style={{ marginTop: 0 }}>Follow-up Plan</h3>
-      <textarea
-        style={{ width: "100%", height: 80 }}
-        value={summary}
-        onChange={(e) => setSummary(e.target.value)}
-      />
+    <div style={{ border: "1px solid #ddd", padding: 12, borderRadius: 8, margin: "8px 0" }}>
+      <b>Follow-up Plan</b>
+      <textarea value={summary} onChange={(e) => setSummary(e.target.value)} style={{ width: "100%", height: 80, marginTop: 4 }} />
       <div style={{ marginTop: 8 }}>
-        <button disabled={busy} onClick={handleCreate}>
-          {busy ? "Creating..." : "Create CarePlan"}
-        </button>
-        {msg && <span style={{ marginLeft: 12 }}>{msg}</span>}
+        <button onClick={handleCreate} disabled={busy}>{busy ? "Creating..." : "Create CarePlan"}</button>
+        {msg && <span style={{ marginLeft: 8 }}>{msg}</span>}
       </div>
     </div>
   );
 };
-
 export default FollowUpScheduler;

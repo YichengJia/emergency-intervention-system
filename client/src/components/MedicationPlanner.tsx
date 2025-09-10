@@ -1,36 +1,28 @@
-// client/src/components/MedicationPlanner.tsx
 import React from "react";
 
-interface Props {
-  meds: any[];
-}
-
-const MedicationPlanner: React.FC<Props> = ({ meds }) => {
+const MedicationPlanner: React.FC<{ meds: any[] }> = ({ meds }) => {
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-      <h3 style={{ marginTop: 0 }}>Medication Overview</h3>
-      {meds.length === 0 && <p>No current MedicationRequests found.</p>}
-      {meds.map((m) => {
+    <div style={{ border: "1px solid #ddd", padding: 12, borderRadius: 8, margin: "8px 0" }}>
+      <b>Medication Overview</b>
+      {meds.length === 0 && <div>No current MedicationRequests found.</div>}
+      {meds.map((m, idx) => {
         const medText =
           m.medicationCodeableConcept?.text ||
-          m.medicationCodeableConcept?.coding?.[0]?.display ||
-          "Medication";
+          m.medicationCodeableConcept?.coding?.[0]?.display || "Medication";
         const when = m.dosageInstruction?.[0]?.timing?.code?.text || "";
         const instruction = m.dosageInstruction?.[0]?.text || "";
         return (
-          <div key={m.id} style={{ marginBottom: 8 }}>
-            <strong>{medText}</strong>
+          <div key={idx} style={{ padding: 8, background: "#fafafa", marginTop: 8, borderRadius: 6 }}>
+            <div><b>{medText}</b></div>
             {instruction && <div>{instruction}</div>}
-            {when && <div style={{ fontSize: 12, color: "#666" }}>{when}</div>}
+            {when && <div>{when}</div>}
           </div>
         );
       })}
-      <hr />
-      <p style={{ fontSize: 12 }}>
-        * Reminders simulated in UI for prototype; actual push messaging is out-of-scope for MVP.
-      </p>
+      <div style={{ fontSize: 12, color: "#555", marginTop: 8 }}>
+        * Reminders are simulated in UI for prototype; push messaging is out-of-scope for MVP.
+      </div>
     </div>
   );
 };
-
 export default MedicationPlanner;

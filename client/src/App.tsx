@@ -1,9 +1,8 @@
-// client/src/App.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
   smartAuthorize, getClient, getPatient, getEncounters, getConditions, getMedicationRequests,
-  computeEdCount, riskFromCount, createCarePlan, createServiceRequest, createCommunicationToPatient,
-  getUserInfo, createFlagHighRisk
+  riskFromFactors, createCarePlan, createServiceRequest, createCommunicationToPatient,
+  getUserInfo, createMedicationStatement, createCommunicationToPractitioner
 } from "./fhir";
 import RiskFlags, { RiskSummary } from "./components/RiskFlags";
 import MedicationPlanner from "./components/MedicationPlanner";
@@ -11,6 +10,8 @@ import FollowUpScheduler from "./components/FollowUpScheduler";
 import ReferralWizard from "./components/ReferralWizard";
 import MedicationCalendar from "./components/MedicationCalendar";
 import ClinicianDashboard from "./components/ClinicianDashboard";
+import NutritionPlanner from "./components/NutritionPlanner";
+import AppointmentScheduler from "./components/AppointmentScheduler";
 
 function useQueryParam(name: string) {
   const [val, setVal] = useState<string | null>(null);
@@ -66,99 +67,92 @@ const App: React.FC = () => {
 
   const summary: RiskSummary | undefined = useMemo(() => {
     if (!patient) return undefined;
-    const edCount = computeEdCount(encounters);
-    let risk = riskFromCount(edCount);
+    const edCount = encounters.filter((e: any) => {
+      const cls = e.class?.code || e.class?.display || "";
+      const types = (e.type || []).map((t: any) => t.coding?.[0]?.code ?? "").join(",");
+      return /emergency|ED|ER|urgent/i.test(`${cls} ${types}`);
+    }).length;
     const chronic = conditions
       .map((c) => c.code?.text || c.code?.coding?.[0]?.display)
       .filter(Boolean) as string[];
-    const hasCardiac = chronic.some((x) => /cardiac|coronary|heart/i.test(x)) ? 1 : 0;
     const hasOpioid = meds.some((m) =>
       /fentanyl|oxycodone|morphine|opioid/i.test(
-        m.medicationCodeableConcept?.text ||
-        m.medicationCodeableConcept?.coding?.[0]?.display || ""
+        m.medicationCodeableConcept?.text || m.medicationCodeableConcept?.coding?.[0]?.display || ""
       )
-    ) ? 1 : 0;
-    const bump = hasCardiac + hasOpioid;
-    if (bump > 0) {
-      if (risk === "LOW") risk = "MODERATE";
-      else if (risk === "MODERATE") risk = "HIGH";
-    }
+    );
+    const risk = riskFromFactors(edCount, chronic, hasOpioid);
     return { edCount12m: edCount, risk, conditions: chronic };
   }, [patient, encounters, conditions, meds]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        if (patient && summary?.risk === "HIGH" && client) {
-          await createFlagHighRisk(patient, "High risk per ED count & comorbidity.");
-        }
-      } catch {}
-    })();
-  }, [patient, summary?.risk, client]);
-
-  if (error) return <div style={{ padding: 16 }}><h3>Error</h3><pre>{error}</pre></div>;
-  if (!patient) return <div style={{ padding: 16 }}>Loading SMART session...</div>;
+  if (error) return <>Error: {error}</>;
+  if (!patient) return <>Loading SMART session...</>;
 
   const name = patient.name?.[0];
   const displayName = name ? `${name.given?.[0] ?? ""} ${name.family ?? ""}`.trim() : patient.id;
-
   const isClinicianView = (view === "clinician");
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
-      <h2>Emergency Intervention System</h2>
-      <div style={{ marginBottom: 12, fontSize: 12 }}>
-        <a href={`${location.pathname}?view=patient`}>Patient View</a> |{" "}
-        <a href={`${location.pathname}?view=clinician`}>Clinician View</a>
+    <div style={{ fontFamily: "system-ui, Arial", padding: 16, maxWidth: 960, margin: "0 auto" }}>
+      <h1>Emergency Intervention System</h1>
+      <div style={{ marginBottom: 8 }}>
+        <a href="?view=patient">Patient View</a> | <a href="?view=clinician">Clinician View</a>
       </div>
 
       {isClinicianView ? (
         <>
-          <p><strong>User:</strong> {practitionerRef ?? "(not a Practitioner)"} </p>
+          <div style={{ margin: "8px 0", fontSize: 12 }}>
+            <b>User:</b> {practitionerRef ?? "(not a Practitioner)"}
+          </div>
           {practitionerRef && practitionerId ? (
-            <ClinicianDashboard
-              practitionerRef={practitionerRef}
-              practitionerId={practitionerId}
-            />
+            <ClinicianDashboard practitionerRef={practitionerRef} practitionerId={practitionerId} />
           ) : (
-            <p>Current user is not a Practitioner or missing id.</p>
+            <div>Current user is not a Practitioner or missing id.</div>
           )}
         </>
       ) : (
         <>
-          <p><strong>Patient:</strong> {displayName} (ID: {patient.id})</p>
+          <div style={{ margin: "8px 0" }}>
+            <b>Patient:</b> {displayName} (ID: {patient.id})
+          </div>
           <RiskFlags summary={summary} />
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-            <MedicationPlanner meds={meds} />
-            <FollowUpScheduler onCreate={async (text) => {
-              if (!client) return; await createCarePlan(client, patient, text);
-            }} />
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            <ReferralWizard
-              onCreate={async (sp) => { if (!client) return; await createServiceRequest(client, patient, sp); }}
-              onEducate={async (txt) => { if (!client) return; await createCommunicationToPatient(client, patient, txt); }}
-            />
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            <MedicationCalendar
-              patient={patient}
-              meds={meds}
-              practitionerRef={practitionerRef}
-              riskLevel={summary?.risk ?? "LOW"}
-            />
-          </div>
+          <MedicationPlanner meds={meds} />
+          <MedicationCalendar
+            patient={patient}
+            meds={meds}
+            practitionerRef={practitionerRef}
+            riskLevel={summary?.risk ?? "LOW"}
+          />
+          <FollowUpScheduler
+            onCreate={async (text) => { if (!client) return; await createCarePlan(client, patient, text); }}
+          />
+          <ReferralWizard
+            onCreate={async (sp) => { if (!client) return; await createServiceRequest(client, patient, sp); }}
+            onEducate={async (txt) => { if (!client) return; await createCommunicationToPatient(client, patient, txt); }}
+          />
+          <NutritionPlanner
+            onCreate={async (instruction) => {
+              if (!client) return;
+              // save as NutritionOrder via fhir.ts helper
+              const { upsertNutritionOrder } = await import("./fhir");
+              await upsertNutritionOrder(client, patient, instruction);
+            }}
+          />
+          <AppointmentScheduler
+            onCreate={async (title, startIso) => {
+              if (!client) return;
+              const { createAppointment } = await import("./fhir");
+              await createAppointment(client, patient, title, startIso);
+              if (practitionerRef) {
+                await createCommunicationToPractitioner(patient, `Appointment booked: ${title} at ${startIso}`, practitionerRef);
+              }
+            }}
+          />
         </>
       )}
 
-      <div style={{ marginTop: 12, fontSize: 12, color: "#666" }}>
-        <p>
-          * This prototype uses synthetic data and writes back to the sandbox
-          (MedicationStatement, Communication, CarePlan, ServiceRequest, optional Flag).
-        </p>
+      <div style={{ marginTop: 24, fontSize: 12, color: "#555" }}>
+        * This prototype uses synthetic data and writes back to the sandbox (MedicationStatement, Communication, CarePlan,
+        ServiceRequest, optional NutritionOrder/Appointment). Do not use real PHI.
       </div>
     </div>
   );

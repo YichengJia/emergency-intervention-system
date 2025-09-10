@@ -1,4 +1,3 @@
-// client/src/fhir.ts
 import FHIR from "fhirclient";
 
 const CLIENT_ID = import.meta.env.VITE_SMART_CLIENT_ID as string;
@@ -15,7 +14,6 @@ export async function smartAuthorize() {
     scope: "launch/patient patient/*.read patient/*.write openid fhirUser offline_access",
     redirectUri: REDIRECT_URI,
     iss: FHIR_ISS
-    // pkce: true
   } as any);
 }
 
@@ -23,126 +21,55 @@ export async function getClient() {
   return FHIR.oauth2.ready();
 }
 
-export async function searchPatientsByName(q: string) {
-  const client = await getClient();
-  const bundle = await client.request(`Patient?name=${encodeURIComponent(q)}&_summary=true&_count=20`, { flat: true });
-  return Array.isArray(bundle) ? bundle : [];
-}
-
-/** ----- Panel management using List ----- */
-function panelTitleFor(practId: string) {
-  return `EIS-Panel-${practId}`;
-}
-
-export async function upsertPanelList(practitionerId: string) {
-  const client = await getClient();
-  const title = panelTitleFor(practitionerId);
-  const existing = await client
-    .request(`List?title=${encodeURIComponent(title)}&_count=1`, { flat: true })
-    .catch(() => []);
-  if (Array.isArray(existing) && existing.length > 0) return existing[0];
-
-  const list = {
-    resourceType: "List",
-    status: "current",
-    mode: "working",
-    title,
-    subject: undefined
-  };
-  return client.create(list);
-}
-
-export async function addPatientToPanel(practitionerId: string, patientId: string) {
-  const client = await getClient();
-  const panel = await upsertPanelList(practitionerId);
-  const full = await client.read({ resourceType: "List", id: panel.id });
-  const entries = full.entry || [];
-  const exists = entries.some((e: any) => e.item?.reference === `Patient/${patientId}`);
-  if (!exists) {
-    entries.push({ item: { reference: `Patient/${patientId}` } });
-    full.entry = entries;
-    return client.update(full);
-  }
-  return full;
-}
-
-export async function listPanelPatients(practitionerId: string) {
-  const client = await getClient();
-  const panel = await upsertPanelList(practitionerId);
-  const full = await client.read({ resourceType: "List", id: panel.id });
-  const ids = (full.entry || [])
-    .map((e: any) => e.item?.reference)
-    .filter((r: string) => r?.startsWith("Patient/"))
-    .map((r: string) => r.split("/")[1]);
-  if (ids.length === 0) return [];
-  // Batch fetch patients
-  const results: any[] = [];
-  for (const id of ids) {
-    try { results.push(await client.read({ resourceType: "Patient", id })); } catch {}
-  }
-  return results;
-}
-
-export async function listPatientMedicationStatements(patientId: string) {
-  const client = await getClient();
-  const bundle = await client.request(
-    `MedicationStatement?patient=${encodeURIComponent(patientId)}&_sort=-dateAsserted&_count=50`,
-    { flat: true }
-  );
-  return Array.isArray(bundle) ? bundle : [];
-}
-
-/** Convenience helpers to read common resources */
-export async function getPatient(client?: any) {
+export async function getUserInfo(client?: any) {
   const c = client ?? (await getClient());
-  return c.patient.read();
+  try { return await c.user.read(); } catch { return null; }
+}
+
+export async function getPatient(c?: any) {
+  const client = c ?? (await getClient());
+  return client.patient.read();
 }
 
 export async function getEncounters(client: any, patientId: string) {
   const twelveMonthsAgo = new Date();
   twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
   const ge = twelveMonthsAgo.toISOString();
-  const bundle = await client.request(
-    `Encounter?patient=${patientId}&date=ge${ge}&_count=200`,
-    { flat: true }
-  );
+  const bundle = await client.request(`Encounter?patient=${patientId}&date=ge${ge}&_count=200`, { flat: true });
   return Array.isArray(bundle) ? bundle : [];
 }
 
 export async function getConditions(client: any, patientId: string) {
-  const bundle = await client.request(
-    `Condition?patient=${patientId}&_count=200`,
-    { flat: true }
-  );
+  const bundle = await client.request(`Condition?patient=${patientId}&_count=200`, { flat: true });
   return Array.isArray(bundle) ? bundle : [];
 }
 
 export async function getMedicationRequests(client: any, patientId: string) {
-  const bundle = await client.request(
-    `MedicationRequest?patient=${patientId}&_count=200`,
-    { flat: true }
-  );
+  const bundle = await client.request(`MedicationRequest?patient=${patientId}&_count=200`, { flat: true });
   return Array.isArray(bundle) ? bundle : [];
 }
 
-/** Simple ED count & risk helpers */
 export function computeEdCount(encounters: any[]): number {
   return encounters.filter((e: any) => {
     const cls = e.class?.code || e.class?.display || "";
-    const types = (e.type || [])
-      .map((t: any) => t.coding?.[0]?.code ?? "")
-      .join(",");
+    const types = (e.type || []).map((t: any) => t.coding?.[0]?.code ?? "").join(",");
     return /emergency|ED|ER|urgent/i.test(`${cls} ${types}`);
   }).length;
 }
 
-export function riskFromCount(count: number): "LOW" | "MODERATE" | "HIGH" {
-  if (count >= 4) return "HIGH";
-  if (count >= 2) return "MODERATE";
-  return "LOW";
+export type RiskLevel = "LOW" | "MODERATE" | "HIGH";
+
+export function riskFromFactors(edCount: number, conditions: string[], opioid: boolean): RiskLevel {
+  let risk: RiskLevel = edCount >= 4 ? "HIGH" : edCount >= 2 ? "MODERATE" : "LOW";
+  const hasCardiac = conditions.some((x) => /cardiac|coronary|heart/i.test(x));
+  const bump = (hasCardiac ? 1 : 0) + (opioid ? 1 : 0);
+  if (bump > 0) {
+    if (risk === "LOW") risk = "MODERATE";
+    else if (risk === "MODERATE") risk = "HIGH";
+  }
+  return risk;
 }
 
-/** Create basic CarePlan (follow-up + education) */
 export async function createCarePlan(client: any, patient: any, summary: string) {
   const now = new Date().toISOString();
   const carePlan = {
@@ -162,12 +89,7 @@ export async function createCarePlan(client: any, patient: any, summary: string)
   return client.create(carePlan);
 }
 
-/** Create referral-like ServiceRequest */
-export async function createServiceRequest(
-  client: any,
-  patient: any,
-  specialtyText: string
-) {
+export async function createServiceRequest(client: any, patient: any, specialtyText: string) {
   const sr = {
     resourceType: "ServiceRequest",
     status: "active",
@@ -179,12 +101,7 @@ export async function createServiceRequest(
   return client.create(sr);
 }
 
-/** Patient education as Communication to the patient record */
-export async function createCommunicationToPatient(
-  client: any,
-  patient: any,
-  text: string
-) {
+export async function createCommunicationToPatient(client: any, patient: any, text: string) {
   const comm = {
     resourceType: "Communication",
     status: "completed",
@@ -195,23 +112,7 @@ export async function createCommunicationToPatient(
   return client.create(comm);
 }
 
-/** Utility to read the user (Practitioner) */
-export async function getUserInfo(client?: any) {
-  const c = client ?? (await getClient());
-  try {
-    const user = await c.user.read();
-    return user; // Practitioner or Person, depending on the server
-  } catch {
-    return null;
-  }
-}
-
-/** Create a Communication to a specific Practitioner (doctor) */
-export async function createCommunicationToPractitioner(
-  patient: any,
-  text: string,
-  practitionerRef: string // e.g. "Practitioner/123"
-) {
+export async function createCommunicationToPractitioner(patient: any, text: string, practitionerRef: string) {
   const client = await getClient();
   const comm = {
     resourceType: "Communication",
@@ -224,15 +125,8 @@ export async function createCommunicationToPractitioner(
   return client.create(comm);
 }
 
-/** Self-reported medication intake (taken or missed) */
-export async function createMedicationStatement(
-  patient: any,
-  medText: string,
-  taken: boolean,
-  isoTime: string
-) {
+export async function createMedicationStatement(patient: any, medText: string, taken: boolean, isoTime: string) {
   const client = await getClient();
-  // R4 has limited adherence modeling; we use note to mark missed.
   const ms = {
     resourceType: "MedicationStatement",
     status: taken ? "completed" : "active",
@@ -245,7 +139,6 @@ export async function createMedicationStatement(
   return client.create(ms);
 }
 
-/** Optionally list latest communications for the practitioner inbox */
 export async function listMyCommunications(practitionerRef: string) {
   const client = await getClient();
   const bundle = await client.request(
@@ -255,17 +148,25 @@ export async function listMyCommunications(practitionerRef: string) {
   return Array.isArray(bundle) ? bundle : [];
 }
 
-/** Raise a high-risk flag on the patient */
-export async function createFlagHighRisk(patient: any, reason: string) {
-  const client = await getClient();
-  const flag = {
-    resourceType: "Flag",
+export async function upsertNutritionOrder(client: any, patient: any, instruction: string) {
+  const no = {
+    resourceType: "NutritionOrder",
     status: "active",
-    category: [{ text: "safety" }],
-    code: { text: "High-risk medication adherence" },
+    intent: "order",
     subject: { reference: `Patient/${patient.id}` },
-    period: { start: new Date().toISOString() },
-    note: [{ text: reason }]
+    dateTime: new Date().toISOString(),
+    oralDiet: { note: [{ text: instruction }] }
   };
-  return client.create(flag);
+  return client.create(no);
+}
+
+export async function createAppointment(client: any, patient: any, title: string, startIso: string) {
+  const appt = {
+    resourceType: "Appointment",
+    status: "booked",
+    description: title,
+    start: startIso,
+    participant: [{ actor: { reference: `Patient/${patient.id}` }, status: "accepted" }]
+  };
+  return client.create(appt);
 }

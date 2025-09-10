@@ -1,33 +1,18 @@
-// client/src/components/RiskFlags.tsx
 import React from "react";
 
 export type RiskLevel = "LOW" | "MODERATE" | "HIGH";
+export interface RiskSummary { edCount12m: number; risk: RiskLevel; conditions: string[]; }
 
-export interface RiskSummary {
-  edCount12m: number;
-  risk: RiskLevel;
-  conditions: string[];
-}
-
-interface Props {
-  summary?: RiskSummary;
-}
-
-const RiskFlags: React.FC<Props> = ({ summary }) => {
+const RiskFlags: React.FC<{ summary?: RiskSummary }> = ({ summary }) => {
   if (!summary) return null;
-  const color =
-    summary.risk === "HIGH" ? "#c0392b" : summary.risk === "MODERATE" ? "#f39c12" : "#27ae60";
-
+  const color = summary.risk === "HIGH" ? "#c0392b" : summary.risk === "MODERATE" ? "#f39c12" : "#27ae60";
   return (
-    <div style={{ border: `2px solid ${color}`, borderRadius: 8, padding: 12 }}>
-      <h3 style={{ marginTop: 0 }}>Risk Summary</h3>
-      <p><strong>ED visits (12 months):</strong> {summary.edCount12m}</p>
-      <p><strong>Risk level:</strong> {summary.risk}</p>
-      {summary.conditions.length > 0 && (
-        <p><strong>Chronic conditions:</strong> {summary.conditions.join(", ")}</p>
-      )}
+    <div style={{ border: `2px solid ${color}`, padding: 12, borderRadius: 8, margin: "8px 0" }}>
+      <b>Risk Summary</b>
+      <div>ED visits (12 months): {summary.edCount12m}</div>
+      <div>Risk level: {summary.risk}</div>
+      {summary.conditions.length > 0 && <div>Chronic conditions: {summary.conditions.join(", ")}</div>}
     </div>
   );
 };
-
 export default RiskFlags;

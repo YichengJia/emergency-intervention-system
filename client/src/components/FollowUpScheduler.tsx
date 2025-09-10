@@ -1,3 +1,4 @@
+// client/src/components/FollowUpScheduler.tsx
 import React, { useState } from "react";
 
 interface Props {
@@ -25,10 +26,7 @@ const FollowUpScheduler: React.FC<Props> = ({ onCreate }) => {
   };
 
   return (
-    <div
-      style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}
-    >
-      {/* Follow-up plan creator */}
+    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
       <h3 style={{ marginTop: 0 }}>Follow-up Plan</h3>
       <textarea
         style={{ width: "100%", height: 80 }}
@@ -36,7 +34,6 @@ const FollowUpScheduler: React.FC<Props> = ({ onCreate }) => {
         onChange={(e) => setSummary(e.target.value)}
       />
       <div style={{ marginTop: 8 }}>
-        {/* Buttons and messages */}
         <button disabled={busy} onClick={handleCreate}>
           {busy ? "Creating..." : "Create CarePlan"}
         </button>

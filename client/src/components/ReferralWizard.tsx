@@ -1,3 +1,4 @@
+// client/src/components/ReferralWizard.tsx
 import React, { useState } from "react";
 
 interface Props {
@@ -7,9 +8,7 @@ interface Props {
 
 const ReferralWizard: React.FC<Props> = ({ onCreate, onEducate }) => {
   const [specialty, setSpecialty] = useState("General Practice (GP)");
-  const [edu, setEdu] = useState(
-    "Medication and diet education provided at discharge."
-  );
+  const [edu, setEdu] = useState("Medication and diet education provided at discharge.");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -28,10 +27,7 @@ const ReferralWizard: React.FC<Props> = ({ onCreate, onEducate }) => {
   };
 
   return (
-    <div
-      style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}
-    >
-      {/* Referral & Education */}
+    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
       <h3 style={{ marginTop: 0 }}>Referral & Education</h3>
       <label>
         Specialty:
@@ -50,7 +46,6 @@ const ReferralWizard: React.FC<Props> = ({ onCreate, onEducate }) => {
         />
       </label>
       <div style={{ marginTop: 8 }}>
-        {/* Submit button */}
         <button disabled={busy} onClick={run}>
           {busy ? "Submitting..." : "Create Referral + Communication"}
         </button>

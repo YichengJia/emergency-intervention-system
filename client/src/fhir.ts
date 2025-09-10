@@ -1,172 +1,451 @@
+// client/src/fhir.ts
+// Core FHIR service for managing patient data and interventions
+
 import FHIR from "fhirclient";
+import Client from "fhirclient/lib/Client";
 
-const CLIENT_ID = import.meta.env.VITE_SMART_CLIENT_ID as string;
-const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI as string;
-const FHIR_ISS = import.meta.env.VITE_FHIR_ISS as string | undefined;
-
-export async function smartAuthorize() {
-  if (!CLIENT_ID || !REDIRECT_URI) throw new Error("Missing env variables.");
-  if (!FHIR_ISS) {
-    throw new Error("No server url found. Provide iss in URL or set VITE_FHIR_ISS.");
-  }
+// SMART on FHIR Authorization
+export async function smartAuthorize(): Promise<void> {
   await FHIR.oauth2.authorize({
-    clientId: CLIENT_ID,
+    clientId: import.meta.env.VITE_SMART_CLIENT_ID || "emergency-intervention-system",
     scope: "launch/patient patient/*.read patient/*.write openid fhirUser offline_access",
-    redirectUri: REDIRECT_URI,
-    iss: FHIR_ISS
-  } as any);
+    redirectUri: import.meta.env.VITE_REDIRECT_URI || window.location.origin + "/",
+    iss: import.meta.env.VITE_FHIR_ISS || "https://launch.smarthealthit.org/v/r4/sim/eyJrIjoiMSIsImoiOiIxIn0/fhir"
+  });
 }
 
-export async function getClient() {
-  return FHIR.oauth2.ready();
+// Get authenticated FHIR client
+export async function getClient(): Promise<Client> {
+  return await FHIR.oauth2.ready();
 }
 
-export async function getUserInfo(client?: any) {
-  const c = client ?? (await getClient());
-  try { return await c.user.read(); } catch { return null; }
-}
-
-export async function getPatient(c?: any) {
-  const client = c ?? (await getClient());
-  return client.patient.read();
-}
-
-export async function getEncounters(client: any, patientId: string) {
-  const twelveMonthsAgo = new Date();
-  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
-  const ge = twelveMonthsAgo.toISOString();
-  const bundle = await client.request(`Encounter?patient=${patientId}&date=ge${ge}&_count=200`, { flat: true });
-  return Array.isArray(bundle) ? bundle : [];
-}
-
-export async function getConditions(client: any, patientId: string) {
-  const bundle = await client.request(`Condition?patient=${patientId}&_count=200`, { flat: true });
-  return Array.isArray(bundle) ? bundle : [];
-}
-
-export async function getMedicationRequests(client: any, patientId: string) {
-  const bundle = await client.request(`MedicationRequest?patient=${patientId}&_count=200`, { flat: true });
-  return Array.isArray(bundle) ? bundle : [];
-}
-
-export function computeEdCount(encounters: any[]): number {
-  return encounters.filter((e: any) => {
-    const cls = e.class?.code || e.class?.display || "";
-    const types = (e.type || []).map((t: any) => t.coding?.[0]?.code ?? "").join(",");
-    return /emergency|ED|ER|urgent/i.test(`${cls} ${types}`);
-  }).length;
-}
-
-export type RiskLevel = "LOW" | "MODERATE" | "HIGH";
-
-export function riskFromFactors(edCount: number, conditions: string[], opioid: boolean): RiskLevel {
-  let risk: RiskLevel = edCount >= 4 ? "HIGH" : edCount >= 2 ? "MODERATE" : "LOW";
-  const hasCardiac = conditions.some((x) => /cardiac|coronary|heart/i.test(x));
-  const bump = (hasCardiac ? 1 : 0) + (opioid ? 1 : 0);
-  if (bump > 0) {
-    if (risk === "LOW") risk = "MODERATE";
-    else if (risk === "MODERATE") risk = "HIGH";
+// Get user information from token
+export async function getUserInfo(client: Client): Promise<any> {
+  try {
+    const token = client.state.tokenResponse;
+    if (token?.id_token) {
+      // Parse JWT to get user info
+      const payload = JSON.parse(atob(token.id_token.split('.')[1]));
+      if (payload.profile) {
+        return await client.request(payload.profile);
+      }
+    }
+    // Fallback to user endpoint
+    return await client.user.read();
+  } catch {
+    return null;
   }
-  return risk;
 }
 
-export async function createCarePlan(client: any, patient: any, summary: string) {
-  const now = new Date().toISOString();
+// Get current patient
+export async function getPatient(client: Client): Promise<any> {
+  return await client.patient.read();
+}
+
+// Get patient encounters with focus on ED visits
+export async function getEncounters(client: Client, patientId: string): Promise<any[]> {
+  try {
+    const response = await client.request(
+      `Encounter?patient=${patientId}&_sort=-date&_count=100`,
+      { flat: true }
+    );
+    return response || [];
+  } catch {
+    return [];
+  }
+}
+
+// Get patient conditions for risk assessment
+export async function getConditions(client: Client, patientId: string): Promise<any[]> {
+  try {
+    const response = await client.request(
+      `Condition?patient=${patientId}&clinical-status=active,recurrence,remission`,
+      { flat: true }
+    );
+    return response || [];
+  } catch {
+    return [];
+  }
+}
+
+// Get medication requests
+export async function getMedicationRequests(client: Client, patientId: string): Promise<any[]> {
+  try {
+    const response = await client.request(
+      `MedicationRequest?patient=${patientId}&status=active,completed&_sort=-authoredon&_count=50`,
+      { flat: true }
+    );
+    return response || [];
+  } catch {
+    return [];
+  }
+}
+
+// Calculate risk level based on ED visits, chronic conditions, and medications
+export function riskFromFactors(
+  edVisitsLast12m: number,
+  chronicConditions: string[],
+  hasOpioidMeds: boolean
+): "LOW" | "MODERATE" | "HIGH" {
+  // Risk scoring algorithm based on evidence-based factors
+  let score = 0;
+
+  // ED visit frequency (major factor)
+  if (edVisitsLast12m >= 8) score += 4;
+  else if (edVisitsLast12m >= 4) score += 3;
+  else if (edVisitsLast12m >= 2) score += 1;
+
+  // Chronic condition burden
+  if (chronicConditions.length >= 3) score += 2;
+  else if (chronicConditions.length >= 2) score += 1;
+
+  // High-risk medications
+  if (hasOpioidMeds) score += 1;
+
+  // Determine risk level
+  if (score >= 5) return "HIGH";
+  if (score >= 2) return "MODERATE";
+  return "LOW";
+}
+
+// Create the care plan for follow-up interventions
+export async function createCarePlan(
+  client: Client,
+  patient: any,
+  description: string
+): Promise<any> {
   const carePlan = {
     resourceType: "CarePlan",
     status: "active",
     intent: "plan",
-    title: "Post-ED Follow-up and Self-Management Plan",
-    subject: { reference: `Patient/${patient.id}` },
-    period: { start: now },
-    description: summary,
-    activity: [
-      { detail: { kind: "ServiceRequest", code: { text: "GP follow-up within 7 days" } } },
-      { detail: { kind: "ServiceRequest", code: { text: "Dietitian consultation (as needed)" } } },
-      { detail: { kind: "CommunicationRequest", code: { text: "Medication adherence reminders" } } }
-    ]
+    subject: {
+      reference: `Patient/${patient.id}`,
+      display: patient.name?.[0]?.text || patient.id
+    },
+    period: {
+      start: new Date().toISOString(),
+      end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days
+    },
+    description: description,
+    category: [{
+      coding: [{
+        system: "https://hl7.org/fhir/us/core/CodeSystem/careplan-category",
+        code: "assess-plan",
+        display: "Assessment and Plan of Treatment"
+      }]
+    }],
+    activity: [{
+      detail: {
+        kind: "Task",
+        code: {
+          coding: [{
+            system: "https://snomed.info/sct",
+            code: "385864009",
+            display: "Medication review"
+          }]
+        },
+        status: "scheduled",
+        description: "Review medication adherence and optimize therapy"
+      }
+    }]
   };
-  return client.create(carePlan);
+
+  return await client.create(carePlan);
 }
 
-export async function createServiceRequest(client: any, patient: any, specialtyText: string) {
-  const sr = {
+// Create service request for referrals
+export async function createServiceRequest(
+  client: Client,
+  patient: any,
+  specialty: string
+): Promise<any> {
+  const serviceRequest = {
     resourceType: "ServiceRequest",
     status: "active",
     intent: "order",
-    subject: { reference: `Patient/${patient.id}` },
-    code: { text: `Referral to ${specialtyText}` },
-    priority: "routine"
+    priority: "routine",
+    subject: {
+      reference: `Patient/${patient.id}`,
+      display: patient.name?.[0]?.text || patient.id
+    },
+    code: {
+      coding: [{
+        system: "https://snomed.info/sct",
+        code: specialty === "GP" ? "103696004" : "183524004",
+        display: specialty === "GP" ? "Primary care referral" : "Specialist referral"
+      }],
+      text: `Referral to ${specialty}`
+    },
+    authoredOn: new Date().toISOString(),
+    reasonCode: [{
+      text: "Reduce emergency department utilization through coordinated care"
+    }]
   };
-  return client.create(sr);
+
+  return await client.create(serviceRequest);
 }
 
-export async function createCommunicationToPatient(client: any, patient: any, text: string) {
-  const comm = {
+// Create communication to patient for education
+export async function createCommunicationToPatient(
+  client: Client,
+  patient: any,
+  message: string
+): Promise<any> {
+  const communication = {
     resourceType: "Communication",
     status: "completed",
-    subject: { reference: `Patient/${patient.id}` },
-    sent: new Date().toISOString(),
-    payload: [{ contentString: text }]
+    category: [{
+      coding: [{
+        system: "https://terminology.hl7.org/CodeSystem/communication-category",
+        code: "instruction",
+        display: "Instruction"
+      }]
+    }],
+    subject: {
+      reference: `Patient/${patient.id}`,
+      display: patient.name?.[0]?.text || patient.id
+    },
+    recipient: [{
+      reference: `Patient/${patient.id}`,
+      display: patient.name?.[0]?.text || patient.id
+    }],
+    payload: [{
+      contentString: message
+    }],
+    sent: new Date().toISOString()
   };
-  return client.create(comm);
+
+  return await client.create(communication);
 }
 
-export async function createCommunicationToPractitioner(patient: any, text: string, practitionerRef: string) {
+// Create medication statement for adherence tracking
+export async function createMedicationStatement(
+  patient: any,
+  medicationText: string,
+  taken: boolean,
+  timestamp: string
+): Promise<any> {
   const client = await getClient();
-  const comm = {
-    resourceType: "Communication",
-    status: "completed",
-    subject: { reference: `Patient/${patient.id}` },
-    recipient: [{ reference: practitionerRef }],
-    sent: new Date().toISOString(),
-    payload: [{ contentString: text }]
-  };
-  return client.create(comm);
-}
 
-export async function createMedicationStatement(patient: any, medText: string, taken: boolean, isoTime: string) {
-  const client = await getClient();
-  const ms = {
+  const statement = {
     resourceType: "MedicationStatement",
-    status: taken ? "completed" : "active",
-    subject: { reference: `Patient/${patient.id}` },
-    dateAsserted: isoTime,
-    effectiveDateTime: isoTime,
-    medicationCodeableConcept: { text: medText },
-    note: [{ text: taken ? "Self-reported taken" : "Self-reported missed" }]
+    status: taken ? "active" : "on-hold",
+    medicationCodeableConcept: {
+      text: medicationText
+    },
+    subject: {
+      reference: `Patient/${patient.id}`,
+      display: patient.name?.[0]?.text || patient.id
+    },
+    dateAsserted: timestamp,
+    note: [{
+      text: taken ? "Medication taken as prescribed" : "Medication dose missed"
+    }]
   };
-  return client.create(ms);
+
+  return await client.create(statement);
 }
 
-export async function listMyCommunications(practitionerRef: string) {
+// Create communication to practitioner for alerts
+export async function createCommunicationToPractitioner(
+  patient: any,
+  message: string,
+  practitionerRef: string
+): Promise<any> {
   const client = await getClient();
-  const bundle = await client.request(
-    `Communication?recipient=${encodeURIComponent(practitionerRef)}&_sort=-sent&_count=20`,
-    { flat: true }
-  );
-  return Array.isArray(bundle) ? bundle : [];
+
+  const communication = {
+    resourceType: "Communication",
+    status: "completed",
+    priority: "high",
+    category: [{
+      coding: [{
+        system: "https://terminology.hl7.org/CodeSystem/communication-category",
+        code: "alert",
+        display: "Alert"
+      }]
+    }],
+    subject: {
+      reference: `Patient/${patient.id}`,
+      display: patient.name?.[0]?.text || patient.id
+    },
+    recipient: [{
+      reference: practitionerRef
+    }],
+    payload: [{
+      contentString: message
+    }],
+    sent: new Date().toISOString()
+  };
+
+  return await client.create(communication);
 }
 
-export async function upsertNutritionOrder(client: any, patient: any, instruction: string) {
-  const no = {
+// List communications for practitioner inbox
+export async function listMyCommunications(practitionerRef: string): Promise<any[]> {
+  const client = await getClient();
+
+  try {
+    const response = await client.request(
+      `Communication?recipient=${practitionerRef}&_sort=-sent&_count=50`,
+      { flat: true }
+    );
+    return response || [];
+  } catch {
+    return [];
+  }
+}
+
+// Get patients on practitioner's panel
+export async function listPanelPatients(practitionerId: string): Promise<any[]> {
+  const client = await getClient();
+
+  try {
+    // Use CareTeam or List resource to manage panels
+    const response = await client.request(
+      `CareTeam?participant=${practitionerId}&status=active`,
+      { flat: true }
+    );
+
+    // Extract unique patients from care teams
+    const patientRefs = new Set<string>();
+    for (const team of response || []) {
+      if (team.subject?.reference) {
+        patientRefs.add(team.subject.reference);
+      }
+    }
+
+    // Fetch patient details
+    const patients = [];
+    for (const ref of patientRefs) {
+      try {
+        const patient = await client.request(ref);
+        patients.push(patient);
+      } catch {
+        // Skip if patient not accessible
+      }
+    }
+
+    return patients;
+  } catch {
+    return [];
+  }
+}
+
+// Add patient to practitioner's panel
+export async function addPatientToPanel(practitionerId: string, patientId: string): Promise<any> {
+  const client = await getClient();
+
+  const careTeam = {
+    resourceType: "CareTeam",
+    status: "active",
+    subject: {
+      reference: `Patient/${patientId}`
+    },
+    participant: [{
+      role: [{
+        coding: [{
+          system: "https://snomed.info/sct",
+          code: "59058001",
+          display: "General physician"
+        }]
+      }],
+      member: {
+        reference: `Practitioner/${practitionerId}`
+      }
+    }],
+    reasonCode: [{
+      text: "ED frequent user intervention program"
+    }]
+  };
+
+  return await client.create(careTeam);
+}
+
+// Search patients by name
+export async function searchPatientsByName(query: string): Promise<any[]> {
+  const client = await getClient();
+
+  try {
+    const response = await client.request(
+      `Patient?name:contains=${encodeURIComponent(query)}&_count=10`,
+      { flat: true }
+    );
+    return response || [];
+  } catch {
+    return [];
+  }
+}
+
+// List patient medication statements
+export async function listPatientMedicationStatements(patientId: string): Promise<any[]> {
+  const client = await getClient();
+
+  try {
+    const response = await client.request(
+      `MedicationStatement?subject=Patient/${patientId}&_sort=-dateasserted&_count=20`,
+      { flat: true }
+    );
+    return response || [];
+  } catch {
+    return [];
+  }
+}
+
+// Create nutrition order for dietary interventions
+export async function upsertNutritionOrder(
+  client: Client,
+  patient: any,
+  instruction: string
+): Promise<any> {
+  const nutritionOrder = {
     resourceType: "NutritionOrder",
     status: "active",
-    intent: "order",
-    subject: { reference: `Patient/${patient.id}` },
+    patient: {
+      reference: `Patient/${patient.id}`,
+      display: patient.name?.[0]?.text || patient.id
+    },
     dateTime: new Date().toISOString(),
-    oralDiet: { note: [{ text: instruction }] }
+    oralDiet: {
+      type: [{
+        text: "Cardiac diet"
+      }],
+      instruction: instruction
+    }
   };
-  return client.create(no);
+
+  return await client.create(nutritionOrder);
 }
 
-export async function createAppointment(client: any, patient: any, title: string, startIso: string) {
-  const appt = {
+// Create appointment for follow-up scheduling
+export async function createAppointment(
+  client: Client,
+  patient: any,
+  description: string,
+  startTime: string
+): Promise<any> {
+  const appointment = {
     resourceType: "Appointment",
-    status: "booked",
-    description: title,
-    start: startIso,
-    participant: [{ actor: { reference: `Patient/${patient.id}` }, status: "accepted" }]
+    status: "proposed",
+    description: description,
+    start: startTime,
+    end: new Date(new Date(startTime).getTime() + 30 * 60 * 1000).toISOString(), // 30 min default
+    participant: [{
+      actor: {
+        reference: `Patient/${patient.id}`,
+        display: patient.name?.[0]?.text || patient.id
+      },
+      required: "required",
+      status: "accepted"
+    }],
+    serviceType: [{
+      coding: [{
+        system: "https://snomed.info/sct",
+        code: "408443003",
+        display: "General medical practice"
+      }]
+    }]
   };
-  return client.create(appt);
+
+  return await client.create(appointment);
 }

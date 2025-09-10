@@ -17,6 +17,8 @@ import MedicationPlanner from "./components/MedicationPlanner";
 import FollowUpScheduler from "./components/FollowUpScheduler";
 import ReferralWizard from "./components/ReferralWizard";
 import { RiskSummary } from "./types";
+import MedicationCalendar from "./components/MedicationCalendar";
+import { getUserInfo } from "./fhir";
 
 const App: React.FC = () => {
   const [client, setClient] = useState<any>(null);
@@ -54,6 +56,33 @@ const App: React.FC = () => {
     })();
   }, []);
 
+useEffect(() => {
+  (async () => {
+    if (!client) return;
+    const user = await getUserInfo(client);
+    if (user?.resourceType === "Practitioner" && user.id) {
+      setPractitionerRef(`Practitioner/${user.id}`);
+    }
+  })();
+}, [client]);
+<div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12}}>
+  <MedicationPlanner meds={meds} />
+  <FollowUpScheduler onCreate={createPlan} />
+</div>
+
+<div style={{marginTop: 12}}>
+  <ReferralWizard onCreate={createReferral} onEducate={createEducation} />
+</div>
+
+{/* Add the new calendar below */}
+<div style={{marginTop: 12}}>
+  <MedicationCalendar
+    patient={patient}
+    meds={meds}
+    practitionerRef={practitionerRef}
+    riskLevel={summary?.risk ?? "LOW"}
+  />
+</div>
   const summary: RiskSummary | undefined = useMemo(() => {
     if (!patient) return undefined;
     const edCount = computeEdCount(encounters);

@@ -114,3 +114,73 @@ export async function createCommunication(
   };
   return client.create(comm);
 }
+
+export async function getUserInfo(client: any) {
+  // fhirclient exposes user info via .user.read() or client.getUserId()
+  // Here we attempt to read token-associated user:
+  try {
+    const user = await client.user.read();
+    return user; // Practitioner resource
+  } catch {
+    return null;
+  }
+}
+
+export async function createMedicationStatement(
+  patient: any,
+  medText: string,
+  taken: boolean,
+  isoTime: string
+) {
+  const client = await getClient();
+  const ms = {
+    resourceType: "MedicationStatement",
+    status: taken ? "completed" : "entered-in-error", // or use "active" + extension for adherence
+    subject: { reference: `Patient/${patient.id}` },
+    dateAsserted: isoTime,
+    effectiveDateTime: isoTime,
+    medicationCodeableConcept: { text: medText },
+    note: [{ text: taken ? "Self-reported taken" : "Self-reported missed" }]
+  };
+  return client.create(ms);
+}
+
+export async function createCommunication(
+  patient: any,
+  text: string,
+  practitionerRef: string // "Practitioner/{id}"
+) {
+  const client = await getClient();
+  const comm = {
+    resourceType: "Communication",
+    status: "completed",
+    subject: { reference: `Patient/${patient.id}` },
+    recipient: [{ reference: practitionerRef }],
+    sent: new Date().toISOString(),
+    payload: [{ contentString: text }]
+  };
+  return client.create(comm);
+}
+
+export async function createFlagHighRisk(patient: any, reason: string) {
+  const client = await getClient();
+  const flag = {
+    resourceType: "Flag",
+    status: "active",
+    category: [{ text: "safety" }],
+    code: { text: "High-risk medication adherence" },
+    subject: { reference: `Patient/${patient.id}` },
+    period: { start: new Date().toISOString() },
+    note: [{ text: reason }]
+  };
+  return client.create(flag);
+}
+
+export async function listMyCommunications(practitionerRef: string) {
+  const client = await getClient();
+  const bundle = await client.request(
+    `Communication?recipient=${encodeURIComponent(practitionerRef)}&_sort=-sent&_count=20`,
+    { flat: true }
+  );
+  return Array.isArray(bundle) ? bundle : [];
+}

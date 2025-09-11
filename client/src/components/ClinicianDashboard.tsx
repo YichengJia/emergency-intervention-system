@@ -44,7 +44,12 @@ const ClinicianDashboard: React.FC<Props> = ({ practitionerRef, practitionerId }
   };
 
   useEffect(() => { loadAll(); }, [practitionerRef, practitionerId]);
-  useInterval(loadAll, 15000); // poll every 15s
+  useInterval(loadAll, 5000); // poll every 5s
+  useInterval(() => {
+    if (selectedPatientId) {
+      listPatientMedicationStatements(selectedPatientId).then(setStatements).catch(() => {});
+    }
+  }, 5000);
 
   const onSearch = async () => {
     if (!query.trim()) { setSearchResults([]); return; }
@@ -72,28 +77,28 @@ const ClinicianDashboard: React.FC<Props> = ({ practitionerRef, practitionerId }
   }, [inbox]);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "AppointmentScheduler.tsx.2fr 1fr", gap: 12 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
       <div>
         <h3 style={{ marginTop: 0 }}>Clinician Inbox</h3>
         {loading && <div>Loading...</div>}
         {[...groupedInbox.entries()].map(([pid, items]) => (
-          <div key={pid} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 8, marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <strong>Patient/{pid}</strong>
-              <button onClick={() => onSelectPatient(pid)}>Open Med Adherence</button>
-            </div>
-            <ul style={{ margin: "8px 0 0 16px" }}>
-              {items.slice(0, 5).map((c) => (
-                <li key={c.id}>
-                  <span style={{ fontSize: 12, color: "#666", marginRight: 6 }}>
-                    {c.sent ? new Date(c.sent).toLocaleString() : ""}
-                  </span>
-                  {c.payload?.[0]?.contentString || "(no text)"}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+  <div key={pid} style={{border:'1px solid #ddd', padding:8, marginBottom:8}}>
+    <div style={{fontWeight:600}}>Patient/{pid}</div>
+    <button
+      type="button"
+      onClick={() => onSelectPatient(String(pid))}
+      style={{marginTop:6}}
+    >
+      Open Med Adherence
+    </button>
+
+    <ul style={{marginTop:8}}>
+      {items.map((c: any, i: number) => (
+        <li key={i}>{c.payload?.[0]?.contentString ?? '(no content)'}</li>
+      ))}
+    </ul>
+  </div>
+))}
       </div>
 
       <div>
@@ -130,23 +135,20 @@ const ClinicianDashboard: React.FC<Props> = ({ practitionerRef, practitionerId }
           })}
         </ul>
 
-        {selectedPatientId && (
-          <div style={{ marginTop: 12 }}>
-            <h4>Medication Statements — Patient/{selectedPatientId}</h4>
-            <ul>
-              {statements.map((s) => (
-                <li key={s.id}>
-                  <strong>{s.medicationCodeableConcept?.text ?? "Medication"}</strong>{" "}
-                  — {s.note?.[0]?.text ?? ""}
-                  <span style={{ marginLeft: 8, fontSize: 12, color: "#666" }}>
-                    {s.dateAsserted ? new Date(s.dateAsserted).toLocaleString() : ""}
-                  </span>
-                </li>
-              ))}
-              {statements.length === 0 && <li>No statements yet.</li>}
-            </ul>
-          </div>
-        )}
+      {selectedPatientId && (
+        <div style={{marginTop:12}}>
+          <h3>Medication Adherence · Patient/{selectedPatientId}</h3>
+          <ul>
+            {statements.map((s:any, i:number) => (
+              <li key={i}>
+                {s.medicationCodeableConcept?.text ?? 'Medication'} ·
+                {s.status} ·
+                {s.dateAsserted ?? s.effectiveDateTime ?? s.meta?.lastUpdated ?? ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       </div>
     </div>
   );

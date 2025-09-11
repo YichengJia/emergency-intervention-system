@@ -1,7 +1,7 @@
 // client/src/fhir.ts
 // Core FHIR service for managing patient data and interventions
 
-import FHIR from "fhirclient";
+import * as FHIR from "fhirclient"
 import Client from "fhirclient/lib/Client";
 
 // SMART on FHIR Authorization
@@ -257,7 +257,6 @@ export async function createCommunicationToPractitioner(
   const communication = {
     resourceType: "Communication",
     status: "completed",
-    priority: "high",
     category: [{
       coding: [{
         system: "https://terminology.hl7.org/CodeSystem/communication-category",
@@ -380,10 +379,9 @@ export async function searchPatientsByName(query: string): Promise<any[]> {
 // List patient medication statements
 export async function listPatientMedicationStatements(patientId: string): Promise<any[]> {
   const client = await getClient();
-
   try {
     const response = await client.request(
-      `MedicationStatement?subject=Patient/${patientId}&_sort=-dateasserted&_count=20`,
+      `MedicationStatement?subject=Patient/${patientId}&_sort=-date&_count=20`,
       { flat: true }
     );
     return response || [];

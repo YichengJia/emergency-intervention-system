@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   smartAuthorize, getClient, getPatient, getEncounters, getConditions, getMedicationRequests,
   riskFromFactors, createCarePlan, createServiceRequest, createCommunicationToPatient,
-  getUserInfo, createMedicationStatement, createCommunicationToPractitioner
+  getUserInfo
 } from "./fhir";
+
 import RiskFlags, { RiskSummary } from "./components/RiskFlags";
 import MedicationPlanner from "./components/MedicationPlanner";
 import FollowUpScheduler from "./components/FollowUpScheduler";
@@ -119,31 +120,44 @@ const App: React.FC = () => {
           <MedicationCalendar
             patient={patient}
             meds={meds}
-            practitionerRef={practitionerRef}
+            practitionerRef={practitionerRef} // pass through if your component supports notifying clinician
             riskLevel={summary?.risk ?? "LOW"}
           />
           <FollowUpScheduler
-            onCreate={async (text) => { if (!client) return; await createCarePlan(client, patient, text); }}
+            onCreate={async (text) => {
+              if (!client) return;
+              // pass practitionerRef so clinician inbox receives a notification
+              await createCarePlan(client, patient, text, practitionerRef);
+            }}
           />
           <ReferralWizard
-            onCreate={async (sp) => { if (!client) return; await createServiceRequest(client, patient, sp); }}
-            onEducate={async (txt) => { if (!client) return; await createCommunicationToPatient(client, patient, txt); }}
+            onCreate={async (sp) => {
+              if (!client) return;
+              await createServiceRequest(client, patient, sp, practitionerRef);
+            }}
+            onEducate={async (txt) => {
+              if (!client) return;
+              await createCommunicationToPatient(client, patient, txt);
+            }}
           />
           <NutritionPlanner
             onCreate={async (instruction) => {
               if (!client) return;
-              // save as NutritionOrder via fhir.ts helper
               const { upsertNutritionOrder } = await import("./fhir");
-              await upsertNutritionOrder(client, patient, instruction);
+              await upsertNutritionOrder(client, patient, instruction, practitionerRef);
             }}
           />
           <AppointmentScheduler
             onCreate={async (title, startIso) => {
               if (!client) return;
-              const { createAppointment } = await import("./fhir");
+              const { createAppointment, createCommunicationToPractitioner } = await import("./fhir");
               await createAppointment(client, patient, title, startIso);
               if (practitionerRef) {
-                await createCommunicationToPractitioner(patient, `Appointment booked: ${title} at ${startIso}`, practitionerRef);
+                await createCommunicationToPractitioner(
+                  patient,
+                  `Appointment booked: ${title} at ${startIso}`,
+                  practitionerRef
+                );
               }
             }}
           />

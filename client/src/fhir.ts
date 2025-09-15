@@ -5,7 +5,7 @@
 // - Provides list* helpers so clinician UI can fetch CarePlan/ServiceRequest/etc.
 
 import * as FHIR from "fhirclient";
-import Client from "fhirclient/lib/Client";
+import type Client from "fhirclient/lib/Client";
 
 // SMART on FHIR Authorization
 export async function smartAuthorize(): Promise<void> {
@@ -37,6 +37,130 @@ export async function getUserInfo(client: Client): Promise<any> {
     return await (client as any).user.read();
   } catch {
     return null;
+  }
+}
+
+// Get launch context patients (for Provider EHR Launch)
+export async function getLaunchContextPatients(): Promise<string[]> {
+  const client = await getClient();
+  const state = (client as any).state;
+  const patientIds: string[] = [];
+
+  // 1. Check token response for patient parameter
+  if (state?.tokenResponse?.patient) {
+    const patientParam = state.tokenResponse.patient;
+    if (patientParam.includes(',')) {
+      return patientParam.split(',');
+    } else {
+      return [patientParam];
+    }
+  }
+
+  // 2. Check launch context
+  if (state?.launchContext?.patient) {
+    if (Array.isArray(state.launchContext.patient)) {
+      return state.launchContext.patient;
+    } else if (typeof state.launchContext.patient === 'string') {
+      return state.launchContext.patient.split(',');
+    }
+  }
+
+  // 3. Check URL parameters
+  const urlParams = new URLSearchParams(window.location.search);
+  const patientParam = urlParams.get('patient');
+  if (patientParam) {
+    return patientParam.split(',');
+  }
+
+  // 4. Check state for patient scope
+  if (state?.scope?.includes('patient/')) {
+    // Extract patient ID from scope if exists
+    const scopeMatch = state.scope.match(/patient\/([^\s]+)/);
+    if (scopeMatch && scopeMatch[1]) {
+      return [scopeMatch[1]];
+    }
+  }
+
+  // 5. For patient launch, get current patient
+  if (state?.tokenResponse?.patient || state?.patient?.id) {
+    const patientId = state?.tokenResponse?.patient || state?.patient?.id;
+    if (patientId) {
+      return [patientId];
+    }
+  }
+
+  return patientIds;
+}
+
+// Get patients by IDs
+export async function getPatientsByIds(patientIds: string[]): Promise<any[]> {
+  const client = await getClient();
+  const patients: any[] = [];
+
+  for (const id of patientIds) {
+    try {
+      const patient = await client.request(`Patient/${id}`);
+      patients.push(patient);
+    } catch (error) {
+      console.error(`Failed to fetch patient ${id}:`, error);
+    }
+  }
+
+  return patients;
+}
+
+// Check if current launch is Provider Launch
+export async function isProviderLaunch(): Promise<boolean> {
+  try {
+    const client = await getClient();
+    const state = (client as any).state;
+
+    // Check for practitioner scope
+    if (state?.scope?.includes('user/Practitioner')) {
+      return true;
+    }
+
+    // Check user type
+    const user = await getUserInfo(client);
+    return user?.resourceType === 'Practitioner';
+  } catch {
+    return false;
+  }
+}
+
+// Get launch information
+export async function getLaunchInfo(): Promise<{
+  type: 'patient' | 'provider' | 'unknown';
+  patientIds: string[];
+  practitionerId?: string;
+}> {
+  try {
+    const client = await getClient();
+    const user = await getUserInfo(client);
+    const patientIds = await getLaunchContextPatients();
+
+    if (user?.resourceType === 'Practitioner') {
+      return {
+        type: 'provider',
+        patientIds,
+        practitionerId: user.id
+      };
+    } else if (patientIds.length > 0) {
+      return {
+        type: 'patient',
+        patientIds
+      };
+    }
+
+    return {
+      type: 'unknown',
+      patientIds: []
+    };
+  } catch {
+    return {
+      type: 'unknown',
+      patientIds: []
+    };
   }
 }
 
@@ -118,9 +242,6 @@ export async function createCommunicationToPractitioner(
   const communication = {
     resourceType: "Communication",
     status: "completed",
-    // priority can be "routine" | "urgent" | "asap" | "stat"
-    // omit if you don't need it to avoid server rejections
-    // priority: "urgent",
     category: [{
       coding: [{
         system: "https://terminology.hl7.org/CodeSystem/communication-category",
@@ -300,28 +421,48 @@ export async function createMedicationStatement(
   return res;
 }
 
-// Create communication to practitioner for alerts (already defined above)
-
-// List communications for practitioner inbox
-export async function listMyCommunications(practitionerRef: string): Promise<any[]> {
+// List communications for practitioner inbox (with optional patient filtering)
+export async function listMyCommunications(
+  practitionerRef: string,
+  patientIds?: string[]
+): Promise<any[]> {
   const client = await getClient();
   try {
     const response = await client.request(
-      `Communication?recipient=${practitionerRef}&_sort=-sent&_count=50`,
+      `Communication?recipient=${practitionerRef}&_sort=-sent&_count=100`,
       { flat: true }
     );
-    return (response as any[]) || [];
+
+    const allCommunications = (response as any[]) || [];
+
+    // Filter by patient IDs if provided
+    if (patientIds && patientIds.length > 0) {
+      return allCommunications.filter((comm: any) => {
+        const patientId = comm.subject?.reference?.split("/")?.[1];
+        return patientIds.includes(patientId);
+      });
+    }
+
+    return allCommunications;
   } catch {
     return [];
   }
 }
 
-// Get patients on practitioner's panel
-export async function listPanelPatients(practitionerId: string): Promise<any[]> {
+// Get patients on practitioner's panel (filtered by launch context)
+export async function listPanelPatients(
+  practitionerId: string,
+  contextPatientIds?: string[]
+): Promise<any[]> {
   const client = await getClient();
 
+  // If context patient IDs provided, fetch those patients directly
+  if (contextPatientIds && contextPatientIds.length > 0) {
+    return await getPatientsByIds(contextPatientIds);
+  }
+
+  // Otherwise, use CareTeam approach
   try {
-    // Use CareTeam or List resource to manage panels
     const response = await client.request(
       `CareTeam?participant=${practitionerId}&status=active`,
       { flat: true }
@@ -391,7 +532,7 @@ export async function searchPatientsByName(query: string): Promise<any[]> {
   }
 }
 
-// List patient medication statements (use _sort=-date instead of non-standard -dateasserted)
+// List patient medication statements
 export async function listPatientMedicationStatements(patientId: string): Promise<any[]> {
   const client = await getClient();
   try {
@@ -430,7 +571,7 @@ export async function upsertNutritionOrder(
   if (practitionerRef) {
     await createCommunicationToPractitioner(
       patient,
-      `Nutrition plan saved`,
+      `Nutrition plan saved: ${instruction}`,
       practitionerRef
     );
   }
@@ -476,7 +617,7 @@ export async function listCarePlans(patientId: string): Promise<any[]> {
   const client = await getClient();
   try {
     const res = await client.request(
-      `CarePlan?subject=Patient/${patientId}&/_sort=-_lastUpdated&_count=20`.replace("/_", ""),
+      `CarePlan?subject=Patient/${patientId}&_sort=-_lastUpdated&_count=20`,
       { flat: true }
     );
     return (res as any[]) || [];

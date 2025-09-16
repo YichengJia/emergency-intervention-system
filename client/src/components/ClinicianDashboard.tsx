@@ -219,15 +219,8 @@ const ClinicianDashboard: React.FC<Props> = ({ practitionerRef, practitionerId, 
             <ul>
               {statements.map((s: any) => (
                 <li key={s.id || s.meta?.versionId}>
-                  {s.medicationCodeableConcept?.text ?? "Medication"} ·
-                  <span style={{
-                    color: s.status === 'active' ? '#28a745' : '#dc3545',
-                    fontWeight: 'bold'
-                  }}>
-                    {s.status === 'active' ? 'TAKEN ✓' : 'MISSED ✗'}
-                  </span> ·
-                  {toLocalTime(s.effectiveDateTime || s.dateAsserted || s.meta?.lastUpdated || "")}
-                  {s.note?.[0]?.text && ` (${s.note[0].text})`}
+                  {s.medicationCodeableConcept?.text ?? "Medication"} · {s.status} ·{" "}
+                  {(s.dateAsserted || s.effectiveDateTime || s.meta?.lastUpdated || "")}
                 </li>
               ))}
               {statements.length === 0 && <li>No statements yet.</li>}

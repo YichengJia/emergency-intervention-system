@@ -12,7 +12,7 @@ export async function smartAuthorize(): Promise<void> {
     clientId: import.meta.env.VITE_SMART_CLIENT_ID || "emergency-intervention-system",
     scope:
       "launch launch/patient launch/encounter patient/*.* user/*.* openid fhirUser profile offline_access",
-    redirectUri: import.meta.env.VITE_REDIRECT_URI || window.location.origin + "/",
+    redirectUri: import.meta.env.VITE_REDIRECT_URI || (window.location.origin + window.location.pathname),
     iss:
       import.meta.env.VITE_FHIR_ISS ||
       "https://launch.smarthealthit.org/v/r4/sim/eyJrIjoiMSIsImoiOiIxIn0/fhir",
@@ -225,13 +225,11 @@ export async function createCarePlan(
 
 /** Create a ServiceRequest (referral) and notify clinician (optional). */
 export async function createServiceRequest(
-  client: Client,
-  patient: any,
-  specialty: string,
-  reason?: string,
-  urgency?: string,
-  practitionerRef?: string
-): Promise<any> {
+    client: Client,
+    patient: any,
+    specialty: string,
+    practitionerRef?: string,
+    urgency?: string,): Promise<any> {
   const serviceRequest = {
     resourceType: "ServiceRequest",
     status: "active",
@@ -262,7 +260,7 @@ export async function createServiceRequest(
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
-      sender: { reference: `Patient/${patient.id}` },  // 添加sender
+      sender: { reference: `Patient/${patient.id}` },
       recipient: [{ reference: practitionerRef }],
       payload: [{
         contentString: `Referral to ${specialty} created.
@@ -344,7 +342,7 @@ export async function createMedicationStatement(
   patient: any,
   medicationText: string,
   taken: boolean,
-  timestamp: string,
+  timestamp: string, // ISO time of the slot
   doseSlot: "AM" | "PM",
   practitionerRef?: string
 ): Promise<any> {
@@ -381,12 +379,11 @@ export async function createMedicationStatement(
   let res;
   if (match?.id) {
     payload.id = match.id;
-    res = await client.update(payload);
+    res = await client.update(payload); // overwrite same slot
   } else {
     res = await client.create(payload);
   }
 
-  // Enhanced notification with local time
   if (practitionerRef) {
     await client.create({
       resourceType: "Communication",
@@ -419,25 +416,28 @@ export async function upsertNutritionOrder(
   symptoms?: string,
   practitionerRef?: string
 ): Promise<any> {
-
-  const existing = await client
+  // Find and revoke ALL existing active NutritionOrders
+  const existing = (await client
     .request(
       `NutritionOrder?patient=Patient/${patient.id}&status=active,draft&_count=100`,
       { flat: true }
     )
-    .catch(() => []) as any[];
+    .catch(() => [])) as any[];
 
+  // Revoke all existing orders
   for (const n of existing) {
     try {
-      await client.update({ ...n, status: "entered-in-error" });
-    } catch {}
+      const updated = {
+        ...n,
+        status: "entered-in-error", // Use proper status for cancelled nutrition orders
+      };
+      await client.update(updated);
+    } catch (err) {
+      console.error(`Error revoking NutritionOrder ${n.id}:`, err);
+    }
   }
 
-  // Create comprehensive NutritionOrder
-  const fullInstruction = `${dietType || 'General diet'}
-Instructions: ${instruction}
-${symptoms ? `Monitor: ${symptoms}` : ''}`;
-
+  // Create new NutritionOrder
   const nutritionOrder = {
     resourceType: "NutritionOrder",
     status: "active",
@@ -450,35 +450,28 @@ ${symptoms ? `Monitor: ${symptoms}` : ''}`;
           coding: [
             {
               system: "http://snomed.info/sct",
-              code: dietType === "cardiac" ? "435801000124108" :
-                    dietType === "diabetic" ? "422915009" : "437421000124105",
-              display: dietType === "cardiac" ? "Cardiac diet" :
-                      dietType === "diabetic" ? "Diabetic diet" : "General diet"
+              
+              code: "435801000124108",
+              display: "Cardiac diet"
             }
           ],
-          text: dietType || "General diet"
+          text: "Cardiac diet"
         }
       ],
-      instruction: fullInstruction
+      instruction
     }
   };
 
   const res = await client.create(nutritionOrder);
 
-  // Enhanced notification to practitioner
+  // Notify practitioner if provided
   if (practitionerRef && res?.id) {
     await client.create({
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
-      sender: { reference: `Patient/${patient.id}` },
       recipient: [{ reference: practitionerRef }],
-      payload: [{ contentString: `NutritionOrder created:
-Type: ${dietType || 'General diet'}
-Instructions: ${instruction}
-${symptoms ? `Monitoring: ${symptoms}` : ''}
-Created at: ${toLocalTime(new Date().toISOString())}`
-      }],
+      payload: [{ contentString: `New NutritionOrder created: ${instruction} [ID: ${res.id}]` }],
       sent: new Date().toISOString(),
     });
   }
@@ -488,24 +481,23 @@ Created at: ${toLocalTime(new Date().toISOString())}`
 
 /** Create an appointment if no future appointment exists; 30-minute default. */
 export async function createAppointment(
-  client: Client,
-  patient: any,
-  description: string,
-  startTime: string,
-  practitionerRef?: string
-): Promise<any> {
+    client: Client,
+    patient: any,
+    description: string,
+    startTime: string
+    , practitionerRef: string | undefined): Promise<any> {
   const nowISO = new Date().toISOString();
 
   // Check for ANY future appointments (not just exact matches)
-  const future = await client
+  const future = (await client
     .request(
       `Appointment?participant=Patient/${patient.id}&date=ge${nowISO}&status=booked,pending,proposed&_count=10`,
       { flat: true }
     )
-    .catch(() => []) as any[];
+    .catch(() => [])) as any[];
 
   if (future.length > 0) {
-    throw new Error("Patient already has a future appointment.");
+    throw new Error("Patient already has a future appointment. Please cancel existing appointment first.");
   }
 
   const endTime = new Date(new Date(startTime).getTime() + 30 * 60 * 1000).toISOString();
@@ -527,32 +519,37 @@ export async function createAppointment(
       {
         coding: [
           {
-            system: "https://snomed.info/sct",
+            system: "http://snomed.info/sct",
             code: "408443003",
             display: "General medical practice",
           },
         ],
       },
     ],
+    appointmentType: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/v2-0276",
+          code: "FOLLOWUP",
+          display: "Follow-up",
+        },
+      ],
+    },
   };
 
   const result = await client.create(appointment);
 
-  // Ensure practitioner notification
-  if (practitionerRef && result?.id) {
+  // Also create a Communication to notify about the appointment
+  if (result?.id) {
     await client.create({
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
-      sender: { reference: `Patient/${patient.id}` },
-      recipient: [{ reference: practitionerRef }],
-      payload: [{
-        contentString: `Appointment scheduled:
-Title: ${description}
-Date/Time: ${toLocalTime(startTime)}
-Duration: 30 minutes
-Appointment ID: ${result.id}`
-      }],
+      payload: [
+        {
+          contentString: `Appointment scheduled: ${description} on ${new Date(startTime).toLocaleString()}`
+        }
+      ],
       sent: new Date().toISOString(),
     });
   }
@@ -596,21 +593,16 @@ export async function listPanelPatients(practitionerId: string): Promise<any[]> 
       }
     }
 
-    const patients: any[] = [];
+    const out: any[] = [];
     for (const ref of patientRefs) {
       try {
         const patient = await client.request(ref);
-        if (patient) {
-          patients.push({
-            ...patient,
-            id: patient.id || ref.split('/')[1]
-          });
-        }
+        if (patient) out.push(patient);
       } catch (err) {
         console.error(`Error fetching patient ${ref}:`, err);
       }
     }
-    return patients;
+    return out;
   } catch (err) {
     console.error("Error listing panel patients:", err);
     return [];

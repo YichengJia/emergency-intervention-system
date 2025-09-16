@@ -157,6 +157,8 @@ const AppointmentScheduler: React.FC<Props> = ({ onCreate, patient }) => {
       setAdditionalNotes("");
       setHasAppointmentLimit(true);
 
+      // Refresh appointment status
+      // removed full page reload; rely on polling or parent state to refresh
     } catch (error: any) {
       if (error.message?.includes("already has a future appointment")) {
         setMessage("⚠️ You already have an appointment scheduled. Please contact your provider to reschedule.");

@@ -161,7 +161,7 @@ const App: React.FC = () => {
             }}
           />
           <ReferralWizard
-            onCreate={async (sp, reason, urgency) => {  // 添加reason和urgency参数
+            onCreate={async (sp, reason, urgency) => {
               if (!client) return;
               const { createServiceRequest } = await import("./fhir");
               await createServiceRequest(client, patient, sp, reason, urgency, practitionerRef);
@@ -172,7 +172,7 @@ const App: React.FC = () => {
             }}
           />
           <NutritionPlanner
-            onCreate={async (instruction, dietType, symptoms) => {  // 添加dietType和symptoms参数
+            onCreate={async (instruction, dietType, symptoms) => {
               if (!client) return;
               const { upsertNutritionOrder } = await import("./fhir");
               await upsertNutritionOrder(client, patient, instruction, dietType, symptoms, practitionerRef);
@@ -180,20 +180,28 @@ const App: React.FC = () => {
           />
 
           <AppointmentScheduler
-            patient={patient}
+            patient={patient}  // 添加 patient 参数
             onCreate={async (title, startIso) => {
               if (!client) return;
-              const { createAppointment } = await import("./fhir");
+              const { createAppointment, createCommunicationToPractitioner } = await import("./fhir");
 
               try {
                 const appt = await createAppointment(client, patient, title, startIso, practitionerRef);
 
+                // Notify practitioner if available
+                if (practitionerRef) {
+                  await createCommunicationToPractitioner(
+                    patient,
+                    `New appointment scheduled by patient ${patient.id}: ${title} at ${new Date(startIso).toLocaleString()}`,
+                    practitionerRef
+                  );
+                }
+
+                // Show success feedback (could add a toast notification here)
                 console.log("Appointment created successfully:", appt);
 
-                // setAppointmentCreated(true); # This function remains to be done.
-
               } catch (err: any) {
-                console.error("Error creating appointment:", err);
+                // Error handling is done in the component
                 throw err;
               }
             }}

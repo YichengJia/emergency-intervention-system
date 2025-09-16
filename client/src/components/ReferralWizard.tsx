@@ -4,8 +4,8 @@
 import React, { useState, useMemo } from "react";
 
 interface Props {
-  onCreate: (specialty: string) => Promise<void>;
-  onEducate: (message: string) => Promise<void>;
+  onCreate: (specialty: string, reason: string, urgency: string) => Promise<void>;
+  onEducate: (text: string) => Promise<void>;
 }
 
 // Evidence-based referral pathways for common ED presentations
@@ -138,6 +138,13 @@ const ReferralWizard: React.FC<Props> = ({ onCreate, onEducate }) => {
   const [referralReason, setReferralReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [instruction, setInstruction] = useState("");
+  const [dietType, setDietType] = useState(""); // cardiac/diabetic/general
+  const [symptoms, setSymptoms] = useState("");
+
+  const handleCreate = async () => {
+  await onCreate(instruction, dietType, symptoms);
+  };
 
   // Determine recommended specialties based on typical ED presentations
   const recommendedSpecialties = useMemo(() => {

@@ -157,10 +157,6 @@ const AppointmentScheduler: React.FC<Props> = ({ onCreate, patient }) => {
       setAdditionalNotes("");
       setHasAppointmentLimit(true);
 
-      // Refresh appointment status
-      setTimeout(() => {
-        window.location.reload(); // Simple refresh to show updated appointment
-      }, 2000);
     } catch (error: any) {
       if (error.message?.includes("already has a future appointment")) {
         setMessage("⚠️ You already have an appointment scheduled. Please contact your provider to reschedule.");

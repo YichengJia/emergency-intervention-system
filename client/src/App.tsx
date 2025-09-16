@@ -161,10 +161,10 @@ const App: React.FC = () => {
             }}
           />
           <ReferralWizard
-            onCreate={async (sp) => {
+            onCreate={async (sp, reason, urgency) => {  // 添加reason和urgency参数
               if (!client) return;
               const { createServiceRequest } = await import("./fhir");
-              await createServiceRequest(client, patient, sp, practitionerRef);
+              await createServiceRequest(client, patient, sp, reason, urgency, practitionerRef);
             }}
             onEducate={async (txt) => {
               if (!client) return;
@@ -172,36 +172,28 @@ const App: React.FC = () => {
             }}
           />
           <NutritionPlanner
-            onCreate={async (instruction) => {
+            onCreate={async (instruction, dietType, symptoms) => {  // 添加dietType和symptoms参数
               if (!client) return;
               const { upsertNutritionOrder } = await import("./fhir");
-              await upsertNutritionOrder(client, patient, instruction, practitionerRef);
+              await upsertNutritionOrder(client, patient, instruction, dietType, symptoms, practitionerRef);
             }}
           />
 
           <AppointmentScheduler
-            patient={patient}  // 添加 patient 参数
+            patient={patient}
             onCreate={async (title, startIso) => {
               if (!client) return;
-              const { createAppointment, createCommunicationToPractitioner } = await import("./fhir");
+              const { createAppointment } = await import("./fhir");
 
               try {
-                const appt = await createAppointment(client, patient, title, startIso);
+                const appt = await createAppointment(client, patient, title, startIso, practitionerRef);
 
-                // Notify practitioner if available
-                if (practitionerRef) {
-                  await createCommunicationToPractitioner(
-                    patient,
-                    `New appointment scheduled by patient ${patient.id}: ${title} at ${new Date(startIso).toLocaleString()}`,
-                    practitionerRef
-                  );
-                }
-
-                // Show success feedback (could add a toast notification here)
                 console.log("Appointment created successfully:", appt);
 
+                // setAppointmentCreated(true); # This function remains to be done.
+
               } catch (err: any) {
-                // Error handling is done in the component
+                console.error("Error creating appointment:", err);
                 throw err;
               }
             }}

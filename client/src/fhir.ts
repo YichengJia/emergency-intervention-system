@@ -20,6 +20,30 @@ export async function smartAuthorize(): Promise<void> {
   });
 }
 
+/**
+ * Convert UTC to local time for display
+ */
+export function toLocalTime(utcString: string): string {
+  const date = new Date(utcString);
+  return date.toLocaleString('en-AU', {
+    timeZone: 'Australia/Brisbane',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+/**
+ * Get current time in Brisbane timezone
+ */
+export function getBrisbaneTime(): Date {
+  const now = new Date();
+  const brisbaneTime = new Date(now.toLocaleString("en-US", {timeZone: "Australia/Brisbane"}));
+  return brisbaneTime;
+}
+
 /** Get an authenticated FHIR client from the current session. */
 export async function getClient(): Promise<Client> {
   return await FHIR.oauth2.ready();
@@ -204,13 +228,15 @@ export async function createServiceRequest(
   client: Client,
   patient: any,
   specialty: string,
+  reason?: string,
+  urgency?: string,
   practitionerRef?: string
 ): Promise<any> {
   const serviceRequest = {
     resourceType: "ServiceRequest",
     status: "active",
     intent: "order",
-    priority: "routine",
+    priority: urgency || "routine",
     subject: {
       reference: `Patient/${patient.id}`,
       display: patient.name?.[0]?.text || patient.id,
@@ -231,13 +257,19 @@ export async function createServiceRequest(
 
   const res = await client.create(serviceRequest);
 
-  if (practitionerRef) {
+  if (practitionerRef && res?.id) {
     await client.create({
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
+      sender: { reference: `Patient/${patient.id}` },  // 添加sender
       recipient: [{ reference: practitionerRef }],
-      payload: [{ contentString: `Referral created: ${specialty}` }],
+      payload: [{
+        contentString: `Referral to ${specialty} created.
+Urgency: ${urgency || 'routine'}
+Reason: ${reason || 'Not specified'}
+Created at: ${toLocalTime(new Date().toISOString())}`
+      }],
       sent: new Date().toISOString(),
     });
   }
@@ -312,7 +344,7 @@ export async function createMedicationStatement(
   patient: any,
   medicationText: string,
   taken: boolean,
-  timestamp: string, // ISO time of the slot
+  timestamp: string,
   doseSlot: "AM" | "PM",
   practitionerRef?: string
 ): Promise<any> {
@@ -349,22 +381,26 @@ export async function createMedicationStatement(
   let res;
   if (match?.id) {
     payload.id = match.id;
-    res = await client.update(payload); // overwrite same slot
+    res = await client.update(payload);
   } else {
     res = await client.create(payload);
   }
 
+  // Enhanced notification with local time
   if (practitionerRef) {
     await client.create({
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
+      sender: { reference: `Patient/${patient.id}` },
       recipient: [{ reference: practitionerRef }],
       payload: [
         {
-          contentString: `Patient ${patient.id} ${
-            taken ? "took" : "missed"
-          } ${medicationText} at ${timestamp} [${doseSlot}]`,
+          contentString: `Medication update:
+Patient: ${patient.name?.[0]?.text || patient.id}
+Medication: ${medicationText}
+Status: ${taken ? "TAKEN ✓" : "MISSED ✗"}
+Time: ${toLocalTime(timestamp)} (${doseSlot})`,
         },
       ],
       sent: new Date().toISOString(),
@@ -379,30 +415,29 @@ export async function upsertNutritionOrder(
   client: Client,
   patient: any,
   instruction: string,
+  dietType?: string,
+  symptoms?: string,
   practitionerRef?: string
 ): Promise<any> {
-  // Find and revoke ALL existing active NutritionOrders
-  const existing = (await client
+
+  const existing = await client
     .request(
       `NutritionOrder?patient=Patient/${patient.id}&status=active,draft&_count=100`,
       { flat: true }
     )
-    .catch(() => [])) as any[];
+    .catch(() => []) as any[];
 
-  // Revoke all existing orders
   for (const n of existing) {
     try {
-      const updated = {
-        ...n,
-        status: "entered-in-error", // Use proper status for cancelled nutrition orders
-      };
-      await client.update(updated);
-    } catch (err) {
-      console.error(`Error revoking NutritionOrder ${n.id}:`, err);
-    }
+      await client.update({ ...n, status: "entered-in-error" });
+    } catch {}
   }
 
-  // Create new NutritionOrder
+  // Create comprehensive NutritionOrder
+  const fullInstruction = `${dietType || 'General diet'}
+Instructions: ${instruction}
+${symptoms ? `Monitor: ${symptoms}` : ''}`;
+
   const nutritionOrder = {
     resourceType: "NutritionOrder",
     status: "active",
@@ -415,27 +450,35 @@ export async function upsertNutritionOrder(
           coding: [
             {
               system: "http://snomed.info/sct",
-              code: "435801000124108",
-              display: "Cardiac diet"
+              code: dietType === "cardiac" ? "435801000124108" :
+                    dietType === "diabetic" ? "422915009" : "437421000124105",
+              display: dietType === "cardiac" ? "Cardiac diet" :
+                      dietType === "diabetic" ? "Diabetic diet" : "General diet"
             }
           ],
-          text: "Cardiac diet"
+          text: dietType || "General diet"
         }
       ],
-      instruction
+      instruction: fullInstruction
     }
   };
 
   const res = await client.create(nutritionOrder);
 
-  // Notify practitioner if provided
+  // Enhanced notification to practitioner
   if (practitionerRef && res?.id) {
     await client.create({
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
+      sender: { reference: `Patient/${patient.id}` },
       recipient: [{ reference: practitionerRef }],
-      payload: [{ contentString: `New NutritionOrder created: ${instruction} [ID: ${res.id}]` }],
+      payload: [{ contentString: `NutritionOrder created:
+Type: ${dietType || 'General diet'}
+Instructions: ${instruction}
+${symptoms ? `Monitoring: ${symptoms}` : ''}
+Created at: ${toLocalTime(new Date().toISOString())}`
+      }],
       sent: new Date().toISOString(),
     });
   }
@@ -448,20 +491,21 @@ export async function createAppointment(
   client: Client,
   patient: any,
   description: string,
-  startTime: string
+  startTime: string,
+  practitionerRef?: string
 ): Promise<any> {
   const nowISO = new Date().toISOString();
 
   // Check for ANY future appointments (not just exact matches)
-  const future = (await client
+  const future = await client
     .request(
       `Appointment?participant=Patient/${patient.id}&date=ge${nowISO}&status=booked,pending,proposed&_count=10`,
       { flat: true }
     )
-    .catch(() => [])) as any[];
+    .catch(() => []) as any[];
 
   if (future.length > 0) {
-    throw new Error("Patient already has a future appointment. Please cancel existing appointment first.");
+    throw new Error("Patient already has a future appointment.");
   }
 
   const endTime = new Date(new Date(startTime).getTime() + 30 * 60 * 1000).toISOString();
@@ -483,37 +527,32 @@ export async function createAppointment(
       {
         coding: [
           {
-            system: "http://snomed.info/sct",
+            system: "https://snomed.info/sct",
             code: "408443003",
             display: "General medical practice",
           },
         ],
       },
     ],
-    appointmentType: {
-      coding: [
-        {
-          system: "http://terminology.hl7.org/CodeSystem/v2-0276",
-          code: "FOLLOWUP",
-          display: "Follow-up",
-        },
-      ],
-    },
   };
 
   const result = await client.create(appointment);
 
-  // Also create a Communication to notify about the appointment
-  if (result?.id) {
+  // Ensure practitioner notification
+  if (practitionerRef && result?.id) {
     await client.create({
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
-      payload: [
-        {
-          contentString: `Appointment scheduled: ${description} on ${new Date(startTime).toLocaleString()}`
-        }
-      ],
+      sender: { reference: `Patient/${patient.id}` },
+      recipient: [{ reference: practitionerRef }],
+      payload: [{
+        contentString: `Appointment scheduled:
+Title: ${description}
+Date/Time: ${toLocalTime(startTime)}
+Duration: 30 minutes
+Appointment ID: ${result.id}`
+      }],
       sent: new Date().toISOString(),
     });
   }
@@ -557,16 +596,21 @@ export async function listPanelPatients(practitionerId: string): Promise<any[]> 
       }
     }
 
-    const out: any[] = [];
+    const patients: any[] = [];
     for (const ref of patientRefs) {
       try {
         const patient = await client.request(ref);
-        if (patient) out.push(patient);
+        if (patient) {
+          patients.push({
+            ...patient,
+            id: patient.id || ref.split('/')[1]
+          });
+        }
       } catch (err) {
         console.error(`Error fetching patient ${ref}:`, err);
       }
     }
-    return out;
+    return patients;
   } catch (err) {
     console.error("Error listing panel patients:", err);
     return [];

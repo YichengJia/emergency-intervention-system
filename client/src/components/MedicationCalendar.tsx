@@ -1,102 +1,82 @@
-// client/src/components/MedicationCalendar.tsx
 import React, { useState } from "react";
 import { createMedicationStatement } from "../fhir";
 
-type Props = {
+interface Props {
   patient: any;
   meds: any[];
   practitionerRef?: string;
-  riskLevel?: string;
-};
+  riskLevel: "LOW" | "MODERATE" | "HIGH";
+}
 
-const Confirm: React.FC<{
-  open: boolean;
-  text: string;
-  onYes: () => void | Promise<void>;
-  onNo: () => void;
-}> = ({ open, text, onYes, onNo }) => {
-  if (!open) return null;
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 20 }}>
-      <div style={{ background: "#fff", padding: 16, borderRadius: 8, width: 320, margin: "20vh auto" }}>
-        <div style={{ marginBottom: 12 }}>{text}</div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onNo}>Cancel</button>
-          <button onClick={onYes}>Confirm</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const Slot: React.FC<{
-  label: string;
-  locked: boolean;
-  msg: string;
-  onConfirm: (taken: boolean) => Promise<void>;
-}> = ({ label, locked, msg, onConfirm }) => {
-  const [ask, setAsk] = useState<null | boolean>(null);
-  const doAction = async () => {
-    if (ask === null) return;
-    await onConfirm(ask);
-    setAsk(null);
-  };
-  return (
-    <div style={{ flex: 1, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>{label}</div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button disabled={locked} onClick={() => setAsk(true)}>
-          Medication Taken
-        </button>
-        <button disabled={locked} onClick={() => setAsk(false)}>
-          Missed
-        </button>
-      </div>
-      <div style={{ marginTop: 6, color: "#555", minHeight: 18 }}>{msg}</div>
-      <Confirm
-        open={ask !== null}
-        text={`Are you sure to mark as「${ask ? "Taken" : "Missed"}」? You cannot change after decision.`}
-        onYes={doAction}
-        onNo={() => setAsk(null)}
-      />
-    </div>
-  );
-};
-
+/**
+ * Minimal AM/PM calendar that:
+ * - keeps AM/PM independent confirmation
+ * - locks slot after confirmation
+ * - sends MedicationStatement & optional clinician notification
+ */
 const MedicationCalendar: React.FC<Props> = ({ patient, meds, practitionerRef }) => {
   const [amLocked, setAmLocked] = useState(false);
   const [pmLocked, setPmLocked] = useState(false);
-  const [amMsg, setAmMsg] = useState("");
-  const [pmMsg, setPmMsg] = useState("");
+  const [amMsg, setAmMsg] = useState<string>("");
+  const [pmMsg, setPmMsg] = useState<string>("");
+
+  const medName = meds?.[0]?.medicationCodeableConcept?.text
+    || meds?.[0]?.medicationCodeableConcept?.coding?.[0]?.display
+    || "Medication";
 
   async function confirmDose(slot: "AM" | "PM", taken: boolean) {
-    const tsDate = new Date();
-    tsDate.setHours(slot === "AM" ? 8 : 20, 0, 0, 0);
-    const ts = tsDate.toISOString();
-    const medText =
-      meds
-        .map(
-          (m: any) => m.medicationCodeableConcept?.text || m.medicationCodeableConcept?.coding?.[0]?.display
-        )
-        .filter(Boolean)
-        .join(", ") || "Medication";
-    await createMedicationStatement(patient, medText, taken, ts, slot, practitionerRef);
+    const base = new Date();
+    base.setMinutes(0, 0, 0);
+    if (slot === "AM") base.setHours(8);
+    else base.setHours(20);
+    const iso = base.toISOString();
+
+    await createMedicationStatement(
+      patient,
+      medName,
+      taken,
+      iso,
+      slot,
+      practitionerRef
+    );
+
     if (slot === "AM") {
-      setAmLocked(true);
       setAmMsg(taken ? "Recorded as taken." : "Recorded as missed.");
+      setAmLocked(true);
     } else {
-      setPmLocked(true);
       setPmMsg(taken ? "Recorded as taken." : "Recorded as missed.");
+      setPmLocked(true);
     }
   }
 
   return (
-    <div>
+    <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, marginTop: 12 }}>
       <h3>Medication Calendar (Today)</h3>
-      <div style={{ display: "flex", gap: 12 }}>
-        <Slot label="08:00" locked={amLocked} msg={amMsg} onConfirm={(t) => confirmDose("AM", t)} />
-        <Slot label="20:00" locked={pmLocked} msg={pmMsg} onConfirm={(t) => confirmDose("PM", t)} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {/* AM slot */}
+        <div style={{ border: "1px solid #ddd", padding: 8, borderRadius: 6 }}>
+          <div style={{ fontWeight: 600 }}>08:00</div>
+          <div>Medication</div>
+          <div style={{ marginTop: 6 }}>
+            <button disabled={amLocked} onClick={() => confirmDose("AM", true)}>Taken</button>{" "}
+            <button disabled={amLocked} onClick={() => confirmDose("AM", false)}>Missed</button>
+          </div>
+          <div style={{ marginTop: 6, color: "#555" }}>{amMsg}</div>
+        </div>
+
+        {/* PM slot */}
+        <div style={{ border: "1px solid #ddd", padding: 8, borderRadius: 6 }}>
+          <div style={{ fontWeight: 600 }}>20:00</div>
+          <div>Medication</div>
+          <div style={{ marginTop: 6 }}>
+            <button disabled={pmLocked} onClick={() => confirmDose("PM", true)}>Taken</button>{" "}
+            <button disabled={pmLocked} onClick={() => confirmDose("PM", false)}>Missed</button>
+          </div>
+          <div style={{ marginTop: 6, color: "#555" }}>{pmMsg}</div>
+        </div>
       </div>
+
       <div style={{ marginTop: 8, fontSize: 12, color: "#777" }}>
         * Schedule parsing is simplified for MVP. Parse full timing in production.
       </div>

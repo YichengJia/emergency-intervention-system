@@ -178,20 +178,32 @@ const App: React.FC = () => {
               await upsertNutritionOrder(client, patient, instruction, practitionerRef);
             }}
           />
+
           <AppointmentScheduler
+            patient={patient}  // 添加 patient 参数
             onCreate={async (title, startIso) => {
               if (!client) return;
               const { createAppointment, createCommunicationToPractitioner } = await import("./fhir");
-              const appt = await createAppointment(client, patient, title, startIso);
-              if (practitionerRef) {
-                await createCommunicationToPractitioner(
-                  patient,
-                  `Appointment booked: ${title} at ${startIso}`,
-                  practitionerRef
-                );
+
+              try {
+                const appt = await createAppointment(client, patient, title, startIso);
+
+                // Notify practitioner if available
+                if (practitionerRef) {
+                  await createCommunicationToPractitioner(
+                    patient,
+                    `New appointment scheduled by patient ${patient.id}: ${title} at ${new Date(startIso).toLocaleString()}`,
+                    practitionerRef
+                  );
+                }
+
+                // Show success feedback (could add a toast notification here)
+                console.log("Appointment created successfully:", appt);
+
+              } catch (err: any) {
+                // Error handling is done in the component
+                throw err;
               }
-              // Optional: display latest appointment locally if your component exposes a setter.
-              // Otherwise clinician sees it via polling; patient should see a toast in the component.
             }}
           />
         </>

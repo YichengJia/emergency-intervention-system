@@ -115,19 +115,32 @@ export async function upsertCarePlan(
   description: string,
   practitionerRef?: string
 ): Promise<any> {
+  // Find and revoke ALL existing active CarePlans
   const existing = (await client
     .request(
-      `CarePlan?subject=Patient/${patient.id}&status=active&_count=50`,
+      `CarePlan?subject=Patient/${patient.id}&status=active,on-hold,draft&_count=100`,
       { flat: true }
     )
     .catch(() => [])) as any[];
 
+  // Revoke all existing plans
   for (const cp of existing) {
     try {
-      await client.update({ ...cp, status: "revoked" });
-    } catch {}
+      const updated = {
+        ...cp,
+        status: "revoked",
+        period: {
+          ...cp.period,
+          end: new Date().toISOString()
+        }
+      };
+      await client.update(updated);
+    } catch (err) {
+      console.error(`Error revoking CarePlan ${cp.id}:`, err);
+    }
   }
 
+  // Create new CarePlan
   const carePlan = {
     resourceType: "CarePlan",
     status: "active",
@@ -142,24 +155,33 @@ export async function upsertCarePlan(
       {
         coding: [
           {
-            system: "https://hl7.org/fhir/us/core/CodeSystem/careplan-category",
+            system: "http://hl7.org/fhir/us/core/CodeSystem/careplan-category",
             code: "assess-plan",
             display: "Assessment and Plan of Treatment",
           },
         ],
       },
     ],
+    activity: [
+      {
+        detail: {
+          status: "scheduled",
+          description: description
+        }
+      }
+    ]
   };
 
   const res = await client.create(carePlan);
 
-  if (practitionerRef) {
+  // Notify practitioner if provided
+  if (practitionerRef && res?.id) {
     await client.create({
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
       recipient: [{ reference: practitionerRef }],
-      payload: [{ contentString: `New CarePlan: ${description}` }],
+      payload: [{ contentString: `New CarePlan created: ${description} [ID: ${res.id}]` }],
       sent: new Date().toISOString(),
     });
   }
@@ -359,36 +381,61 @@ export async function upsertNutritionOrder(
   instruction: string,
   practitionerRef?: string
 ): Promise<any> {
+  // Find and revoke ALL existing active NutritionOrders
   const existing = (await client
     .request(
-      `NutritionOrder?patient=Patient/${patient.id}&status=active&_count=50`,
+      `NutritionOrder?patient=Patient/${patient.id}&status=active,draft&_count=100`,
       { flat: true }
     )
     .catch(() => [])) as any[];
 
+  // Revoke all existing orders
   for (const n of existing) {
     try {
-      await client.update({ ...n, status: "revoked" });
-    } catch {}
+      const updated = {
+        ...n,
+        status: "entered-in-error", // Use proper status for cancelled nutrition orders
+      };
+      await client.update(updated);
+    } catch (err) {
+      console.error(`Error revoking NutritionOrder ${n.id}:`, err);
+    }
   }
 
+  // Create new NutritionOrder
   const nutritionOrder = {
     resourceType: "NutritionOrder",
     status: "active",
     patient: { reference: `Patient/${patient.id}` },
     dateTime: new Date().toISOString(),
-    oralDiet: { type: [{ text: "Cardiac diet" }], instruction },
+    intent: "order",
+    oralDiet: {
+      type: [
+        {
+          coding: [
+            {
+              system: "http://snomed.info/sct",
+              code: "435801000124108",
+              display: "Cardiac diet"
+            }
+          ],
+          text: "Cardiac diet"
+        }
+      ],
+      instruction
+    }
   };
 
   const res = await client.create(nutritionOrder);
 
-  if (practitionerRef) {
+  // Notify practitioner if provided
+  if (practitionerRef && res?.id) {
     await client.create({
       resourceType: "Communication",
       status: "completed",
       subject: { reference: `Patient/${patient.id}` },
       recipient: [{ reference: practitionerRef }],
-      payload: [{ contentString: `New NutritionOrder created` }],
+      payload: [{ contentString: `New NutritionOrder created: ${instruction} [ID: ${res.id}]` }],
       sent: new Date().toISOString(),
     });
   }
@@ -404,23 +451,27 @@ export async function createAppointment(
   startTime: string
 ): Promise<any> {
   const nowISO = new Date().toISOString();
+
+  // Check for ANY future appointments (not just exact matches)
   const future = (await client
     .request(
-      `Appointment?participant=Patient/${patient.id}&date=ge${nowISO}&_sort=start&_count=5`,
+      `Appointment?participant=Patient/${patient.id}&date=ge${nowISO}&status=booked,pending,proposed&_count=10`,
       { flat: true }
     )
     .catch(() => [])) as any[];
 
   if (future.length > 0) {
-    throw new Error("Patient already has a future appointment.");
+    throw new Error("Patient already has a future appointment. Please cancel existing appointment first.");
   }
+
+  const endTime = new Date(new Date(startTime).getTime() + 30 * 60 * 1000).toISOString();
 
   const appointment = {
     resourceType: "Appointment",
     status: "booked",
     description,
     start: startTime,
-    end: new Date(new Date(startTime).getTime() + 30 * 60 * 1000).toISOString(),
+    end: endTime,
     participant: [
       {
         actor: { reference: `Patient/${patient.id}` },
@@ -432,16 +483,42 @@ export async function createAppointment(
       {
         coding: [
           {
-            system: "https://snomed.info/sct",
+            system: "http://snomed.info/sct",
             code: "408443003",
             display: "General medical practice",
           },
         ],
       },
     ],
+    appointmentType: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/v2-0276",
+          code: "FOLLOWUP",
+          display: "Follow-up",
+        },
+      ],
+    },
   };
 
-  return await client.create(appointment);
+  const result = await client.create(appointment);
+
+  // Also create a Communication to notify about the appointment
+  if (result?.id) {
+    await client.create({
+      resourceType: "Communication",
+      status: "completed",
+      subject: { reference: `Patient/${patient.id}` },
+      payload: [
+        {
+          contentString: `Appointment scheduled: ${description} on ${new Date(startTime).toLocaleString()}`
+        }
+      ],
+      sent: new Date().toISOString(),
+    });
+  }
+
+  return result;
 }
 
 // ---------- Clinician inbox & patient lists ----------
@@ -469,23 +546,29 @@ export async function listPanelPatients(practitionerId: string): Promise<any[]> 
   const client = await getClient();
   try {
     const teams = await client.request(
-      `CareTeam?participant=Practitioner/${practitionerId}&status=active`,
+      `CareTeam?participant=Practitioner/${practitionerId}&status=active&_count=100`,
       { flat: true }
     );
 
     const patientRefs = new Set<string>();
     for (const t of (teams || []) as any[]) {
-      if (t.subject?.reference) patientRefs.add(t.subject.reference);
+      if (t.subject?.reference) {
+        patientRefs.add(t.subject.reference);
+      }
     }
 
     const out: any[] = [];
     for (const ref of patientRefs) {
       try {
-        out.push(await client.request(ref));
-      } catch {}
+        const patient = await client.request(ref);
+        if (patient) out.push(patient);
+      } catch (err) {
+        console.error(`Error fetching patient ${ref}:`, err);
+      }
     }
     return out;
-  } catch {
+  } catch (err) {
+    console.error("Error listing panel patients:", err);
     return [];
   }
 }
@@ -524,12 +607,38 @@ export async function addPatientToPanel(
 export async function searchPatientsByName(query: string): Promise<any[]> {
   const client = await getClient();
   try {
-    const r = await client.request(
-      `Patient?name=${encodeURIComponent(query)}&_count=10`,
+    // First check if query looks like a patient ID
+    if (query && !query.includes(" ")) {
+      try {
+        // Try direct ID fetch
+        const patient = await client.request(`Patient/${query}`);
+        if (patient) {
+          return [patient];
+        }
+      } catch {
+        // Not a valid ID, proceed with name search
+      }
+    }
+
+    // Search by name (includes given, family, and text)
+    const results = await client.request(
+      `Patient?name=${encodeURIComponent(query)}&_count=20`,
       { flat: true }
     );
-    return r || [];
-  } catch {
+
+    // Also search by identifier if no results
+    if ((!results || results.length === 0) && query) {
+      const idResults = await client.request(
+        `Patient?identifier=${encodeURIComponent(query)}&_count=20`,
+        { flat: true }
+      ).catch(() => []);
+
+      return idResults || [];
+    }
+
+    return results || [];
+  } catch (err) {
+    console.error("Error searching patients:", err);
     return [];
   }
 }
@@ -541,12 +650,28 @@ export async function listPatientMedicationStatements(
 ): Promise<any[]> {
   const client = await getClient();
   try {
+    // Get statements from last 30 days to avoid clutter
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const dateFilter = thirtyDaysAgo.toISOString().split('T')[0];
+
     const r = await client.request(
-      `MedicationStatement?subject=Patient/${patientId}&_sort=-dateasserted&_count=50`,
+      `MedicationStatement?subject=Patient/${patientId}&effective=ge${dateFilter}&_sort=-effective&_count=100`,
       { flat: true }
     );
+
+    // If no results with date filter, try without
+    if (!r || r.length === 0) {
+      const allStatements = await client.request(
+        `MedicationStatement?subject=Patient/${patientId}&_sort=-effective&_count=50`,
+        { flat: true }
+      );
+      return allStatements || [];
+    }
+
     return r || [];
-  } catch {
+  } catch (err) {
+    console.error("Error fetching medication statements:", err);
     return [];
   }
 }
@@ -593,12 +718,22 @@ export async function listNutritionOrders(patientId: string): Promise<any[]> {
 export async function listAppointments(patientId: string): Promise<any[]> {
   const client = await getClient();
   try {
+    // Get all appointments (past and future)
     const r = await client.request(
       `Appointment?participant=Patient/${patientId}&_sort=-start&_count=20`,
       { flat: true }
     );
-    return r || [];
-  } catch {
+
+    // Filter to only show relevant appointments
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    return (r || []).filter((apt: any) => {
+      const aptDate = new Date(apt.start);
+      return aptDate >= thirtyDaysAgo; // Show appointments from last 30 days and future
+    });
+  } catch (err) {
+    console.error("Error fetching appointments:", err);
     return [];
   }
 }

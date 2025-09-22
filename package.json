@@ -1,0 +1,11 @@
+{
+  "name": "emergency-intervention-system",
+  "private": true,
+  "workspaces": [],
+  "scripts": {
+    "install": "cd client && npm install",
+    "dev": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "preview": "cd client && npm run preview"
+  }
+}

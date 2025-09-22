@@ -450,7 +450,7 @@ export async function upsertNutritionOrder(
           coding: [
             {
               system: "http://snomed.info/sct",
-              
+
               code: "435801000124108",
               display: "Cardiac diet"
             }

@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>SMART Launch</title></head>
+  <body>
+    <script>
+      // Minimal SMART EHR launch: redirect to app with iss & launch params
+      const params = new URLSearchParams(location.search);
+      const iss = params.get("iss");
+      const launch = params.get("launch");
+      if (!iss || !launch) {
+        document.body.innerText = "Missing iss or launch parameter.";
+      } else {
+        const redirect = (import.meta && import.meta.env && import.meta.env.VITE_REDIRECT_URI) || "/index.html";
+        const url = new URL(redirect, location.origin);
+        url.searchParams.set("iss", iss);
+        url.searchParams.set("launch", launch);
+        location.replace(url.toString());
+      }
+    </script>
+  </body>
+</html>

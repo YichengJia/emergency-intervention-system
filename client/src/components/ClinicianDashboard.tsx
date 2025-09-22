@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  listMyCommunications,
   listPanelPatients,
   addPatientToPanel,
   searchPatientsByName,
@@ -10,6 +9,7 @@ import {
   listNutritionOrders,
   listAppointments,
 } from "../fhir";
+import { formatLocalTime } from "../utils/tz";
 
 /** Simple polling hook */
 function useInterval(cb: () => void, ms: number) {
@@ -27,13 +27,6 @@ interface Props {
 }
 
 /** Narrow helper that lists Communications for a specific patient + recipient */
-async function listMyCommunicationsForPatient(prRef: string, patientId: string): Promise<any[]> {
-  const { getClient } = await import("../fhir");
-  const c = await getClient();
-  try {
-    const res = await c.request(
-      `Communication?recipient=${encodeURIComponent(prRef)}&subject=Patient/${patientId}&_sort=-sent&_count=50`,
-      { flat: true }
     );
     return (res as any[]) || [];
   } catch {
@@ -44,7 +37,6 @@ async function listMyCommunicationsForPatient(prRef: string, patientId: string):
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS ?? 5000);
 
 const ClinicianDashboard: React.FC<Props> = ({ practitionerRef, practitionerId, contextPatientId }) => {
-  const [inbox, setInbox] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -220,7 +212,7 @@ const ClinicianDashboard: React.FC<Props> = ({ practitionerRef, practitionerId, 
               {statements.map((s: any) => (
                 <li key={s.id || s.meta?.versionId}>
                   {s.medicationCodeableConcept?.text ?? "Medication"} · {s.status} ·{" "}
-                  {(s.dateAsserted || s.effectiveDateTime || s.meta?.lastUpdated || "")}
+                  {formatLocalTime(s.dateAsserted || s.effectiveDateTime || s.meta?.lastUpdated || "")}
                 </li>
               ))}
               {statements.length === 0 && <li>No statements yet.</li>}
@@ -262,7 +254,7 @@ const ClinicianDashboard: React.FC<Props> = ({ practitionerRef, practitionerId, 
             <ul>
               {latestAppointment.length > 0 ? (
                 latestAppointment.map((a: any) => (
-                  <li key={a.id}>{a.description ?? "Appointment"} · {a.start ?? ""} → {a.end ?? ""}</li>
+                  <li key={a.id}>{a.description ?? "Appointment"} · {formatLocalTime(a.start ?? "")} → {formatLocalTime(a.end ?? "")}</li>
                 ))
               ) : (
                 <li>No appointments.</li>

@@ -33,7 +33,6 @@ export function isSameLocalDay(iso: string, ref = new Date(), tz = LOCAL_TZ) {
 
 /** Start and end of "today" in local tz, returned as UTC ISO strings. */
 export function dayBoundsISO(date = new Date(), tz = LOCAL_TZ) {
-  // Materialize local date parts in tz
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
     year: 'numeric',
@@ -41,31 +40,22 @@ export function dayBoundsISO(date = new Date(), tz = LOCAL_TZ) {
     day: '2-digit',
   })
     .formatToParts(date)
-    .reduce((o, p) => {
+    .reduce((o: Record<string,string>, p) => {
       if (p.type !== 'literal') o[p.type] = p.value;
       return o;
-    }, {} as Record<string, string>);
+    }, {});
 
-  // Construct local-midnight Date objects in the *runtime* timezone.
-  // This is acceptable in browsers, since runtime tz == user local tz.
   const startLocal = new Date(
     Number(parts.year),
     Number(parts.month) - 1,
     Number(parts.day),
-    0,
-    0,
-    0,
-    0
+    0,0,0,0
   );
   const endLocal = new Date(
     Number(parts.year),
     Number(parts.month) - 1,
     Number(parts.day) + 1,
-    0,
-    0,
-    0,
-    0
+    0,0,0,0
   );
-
   return { startISO: startLocal.toISOString(), endISO: endLocal.toISOString() };
 }

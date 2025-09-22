@@ -1,14 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   smartAuthorize, getClient, getPatient, getEncounters, getConditions, getMedicationRequests,
-  riskFromFactors, createCarePlan, createServiceRequest, createCommunicationToPatient,
-  getUserInfo
+  riskFromFactors, createCarePlan, createServiceRequest, getUserInfo
 } from "./fhir";
 
 import RiskFlags, { RiskSummary } from "./components/RiskFlags";
 import MedicationPlanner from "./components/MedicationPlanner";
 import FollowUpScheduler from "./components/FollowUpScheduler";
-import ReferralWizard from "./components/ReferralWizard";
 import MedicationCalendar from "./components/MedicationCalendar";
 import ClinicianDashboard from "./components/ClinicianDashboard";
 import NutritionPlanner from "./components/NutritionPlanner";
@@ -160,19 +158,7 @@ const App: React.FC = () => {
               await upsertCarePlan(client, patient, text, practitionerRef);
             }}
           />
-          <ReferralWizard
-            onCreate={async (specialty, reason, urgency) => {
-              if (!client) return;
-              const { createServiceRequest } = await import("./fhir");
-              await createServiceRequest(client, patient, specialty, reason, urgency, practitionerRef);
-            }}
-            onEducate={async (txt) => {
-              if (!client) return;
-              await createCommunicationToPatient(client, patient, txt);
-            }}
-          />
-
-          <NutritionPlanner
+<NutritionPlanner
             onCreate={async (instruction, dietType, symptoms) => {
               if (!client) return;
               const { upsertNutritionOrder } = await import("./fhir");
@@ -181,20 +167,28 @@ const App: React.FC = () => {
           />
 
           <AppointmentScheduler
-            patient={patient}
+            patient={patient}  // 添加 patient 参数
             onCreate={async (title, startIso) => {
               if (!client) return;
-              const { createAppointment } = await import("./fhir");
-              const appt = await createAppointment(client, patient, title, startIso, practitionerRef);
-              // 不要刷新页面
-              console.log("Appointment created:", appt);
+              const { createAppointment, } = await import("./fhir");
+
+              try {
+                const appt = await createAppointment(client, patient, title, startIso, practitionerRef);
+
+                // Show success feedback (could add a toast notification here)
+                console.log("Appointment created successfully:", appt);
+
+              } catch (err: any) {
+                // Error handling is done in the component
+                throw err;
+              }
             }}
           />
         </>
       )}
 
       <div style={{ marginTop: 24, fontSize: 12, color: "#555" }}>
-        * This prototype uses synthetic data and writes back to the sandbox (MedicationStatement, Communication, CarePlan,
+        * This prototype uses synthetic data and writes back to the sandbox (MedicationStatement, CarePlan,
         ServiceRequest, optional NutritionOrder/Appointment). Do not use real PHI.
       </div>
     </div>

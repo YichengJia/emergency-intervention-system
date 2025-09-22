@@ -1,3 +1,12 @@
+
+## Refactor: DB-mediated patient–clinician flow
+
+- Removed direct messaging features. No `Communication` send or inbox.
+- Patient writes structured resources: `MedicationStatement`, `CarePlan` notes via `CarePlan`, `ServiceRequest` (referrals), optional `NutritionOrder`, and `Appointment`.
+- Clinician reads these resources from the FHIR server. No point-to-point channel.
+- Referral Wizard UI removed. ServiceRequest creation remains via existing forms or external EHR.
+- Code limited to resources available in your sandbox capability list.
+
 # Emergency Intervention System (SMART on FHIR Prototype)
 
 This is a SMART on FHIR, FHIR R4 prototype to support delivery of interventions to reduce emergency department representations and avoidable readmissions.

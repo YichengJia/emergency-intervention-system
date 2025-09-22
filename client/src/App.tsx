@@ -161,16 +161,17 @@ const App: React.FC = () => {
             }}
           />
           <ReferralWizard
-            onCreate={async (sp, reason, urgency) => {
+            onCreate={async (specialty, reason, urgency) => {
               if (!client) return;
               const { createServiceRequest } = await import("./fhir");
-              await createServiceRequest(client, patient, sp, reason, urgency, practitionerRef);
+              await createServiceRequest(client, patient, specialty, reason, urgency, practitionerRef);
             }}
             onEducate={async (txt) => {
               if (!client) return;
               await createCommunicationToPatient(client, patient, txt);
             }}
           />
+
           <NutritionPlanner
             onCreate={async (instruction, dietType, symptoms) => {
               if (!client) return;
@@ -180,30 +181,13 @@ const App: React.FC = () => {
           />
 
           <AppointmentScheduler
-            patient={patient}  // 添加 patient 参数
+            patient={patient}
             onCreate={async (title, startIso) => {
               if (!client) return;
-              const { createAppointment, createCommunicationToPractitioner } = await import("./fhir");
-
-              try {
-                const appt = await createAppointment(client, patient, title, startIso, practitionerRef);
-
-                // Notify practitioner if available
-                if (practitionerRef) {
-                  await createCommunicationToPractitioner(
-                    patient,
-                    `New appointment scheduled by patient ${patient.id}: ${title} at ${new Date(startIso).toLocaleString()}`,
-                    practitionerRef
-                  );
-                }
-
-                // Show success feedback (could add a toast notification here)
-                console.log("Appointment created successfully:", appt);
-
-              } catch (err: any) {
-                // Error handling is done in the component
-                throw err;
-              }
+              const { createAppointment } = await import("./fhir");
+              const appt = await createAppointment(client, patient, title, startIso, practitionerRef);
+              // 不要刷新页面
+              console.log("Appointment created:", appt);
             }}
           />
         </>
